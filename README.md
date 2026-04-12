@@ -1,34 +1,69 @@
-# Continuous Authentication System - Frontend
+Continuous Authentication System - Frontend & Backend
 
-This repository contains the **frontend of the Continuous Authentication System** project.  
-Built with **React.js**, it includes UI components for login, dashboard, and user interaction.
+This repository contains the frontend and backend modules of the Continuous Authentication System project.
+The system is designed to provide continuous user authentication using behavioral biometrics, such as keystroke dynamics and mouse movement patterns.
 
-## Project Timeline
+It is built using React.js, Flask, MongoDB, and Siamese Neural Networks, combining web development and machine learning for secure authentication.
 
-- **Day 1:** Initial frontend push
-  - React project setup
-  - Basic folder structure
-  - Initial components (Login, Dashboard)
+---
 
-- **Day 2:** [Add what you did here]  
-- **Day 3:** [Add what you did here]  
+Project Timeline
 
-*(Update this section as development progresses)*
+Day 1: Initial Frontend Push
 
-## Features
+- React project setup
+- Basic folder structure
+- Initial UI components
+  - Login Page
+  - Dashboard Page
+- Responsive layout implementation
 
-- Responsive UI using React.js  
-- Interactive forms for login and user actions  
-- Placeholder pages for dashboard and analytics  
+Day 2: Backend & AI Module Integration
 
-## Tech Stack
+- Added "app.py" as Flask backend starter
+- Created feature extraction module
+  - Keystroke dynamics
+  - Mouse movement features
+- Added Siamese Neural Network model structure
+- Organized backend folder architecture
+- Prepared files for future API integration
 
-- React.js  
-- HTML5, CSS3, JavaScript  
-- Axios for API requests  
+Day 3: Database & API Integration (Planned)
 
-## How to Run
+- MongoDB local server connection
+- User data collection API
+- Authentication result storage
+- Backend route integration
+- Frontend-backend API connection using Axios
 
-1. Clone the repository:  
-```bash
-git clone https://github.com/<your-username>/<repo-name>.git
+(This section will be updated as development progresses.)
+
+---
+
+Features
+
+- Responsive UI using React.js
+- Flask backend API support
+- Behavioral biometric feature extraction
+- Siamese Neural Network based user authentication
+- MongoDB database integration
+- Login and dashboard workflow
+- Scalable full-stack architecture
+
+---
+
+Tech Stack
+
+- Frontend: React.js, HTML5, CSS3, JavaScript
+- Backend: Flask, Python
+- Database: MongoDB
+- Machine Learning: PyTorch, Siamese Neural Network
+- API Communication: Axios
+
+---
+
+Project Objective
+
+The objective of this project is to develop a continuous authentication system that verifies user identity throughout the session instead of only at login time.
+
+The system analyzes typing behavior and mouse activity patterns to detect anomalies and improve security.
