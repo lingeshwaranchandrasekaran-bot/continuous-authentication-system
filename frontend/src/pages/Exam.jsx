@@ -1,97 +1,27 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
 const examTasks = [
-  {
-    type: "mcq",
-    question: "Which model is used in this project for user behavior comparison?",
-    options: ["CNN", "Siamese Neural Network", "KNN", "Naive Bayes"]
-  },
-  {
-    type: "mcq",
-    question: "Which database is used in this system?",
-    options: ["MySQL", "MongoDB", "Oracle", "SQLite"]
-  },
-  {
-    type: "mcq",
-    question: "Which feature measures how long a key is pressed?",
-    options: ["Flight time", "Hold time", "Mouse speed", "Latency"]
-  },
-  {
-    type: "mcq",
-    question: "Which frontend framework is used here?",
-    options: ["React", "Django", "Flask", "Spring"]
-  },
-  {
-    type: "mcq",
-    question: "Which suspicious action is checked during exam?",
-    options: ["Copy paste", "Tab switch", "Window blur", "All of the above"]
-  },
-  {
-    type: "mcq",
-    question: "Which backend framework is used?",
-    options: ["Laravel", "Flask", "Angular", "Express only"]
-  },
-  {
-    type: "mcq",
-    question: "Which command shows IP information in Linux?",
-    options: ["pwd", "ls", "ip a", "cd"]
-  },
-  {
-    type: "mcq",
-    question: "Which typing feature measures time between keys?",
-    options: ["Flight time", "Hold time", "Scroll time", "Click time"]
-  },
-  {
-    type: "mcq",
-    question: "Which collection stores training baseline?",
-    options: ["alerts", "training", "reports", "analysis_only"]
-  },
-  {
-    type: "mcq",
-    question: "What should happen after repeated fraud warnings?",
-    options: ["Ignore", "Auto logout", "Refresh page", "Change color"]
-  },
+  { type: "mcq", question: "Which model is used in this project for user behavior comparison?", options: ["CNN", "Siamese Neural Network", "KNN", "Naive Bayes"] },
+  { type: "mcq", question: "Which database is used in this system?", options: ["MySQL", "MongoDB", "Oracle", "SQLite"] },
+  { type: "mcq", question: "Which feature measures how long a key is pressed?", options: ["Flight time", "Hold time", "Mouse speed", "Latency"] },
+  { type: "mcq", question: "Which frontend framework is used here?", options: ["React", "Django", "Flask", "Spring"] },
+  { type: "mcq", question: "Which suspicious action is checked during exam?", options: ["Copy paste", "Tab switch", "Window blur", "All of the above"] },
+  { type: "mcq", question: "Which backend framework is used?", options: ["Laravel", "Flask", "Angular", "Express only"] },
+  { type: "mcq", question: "Which command shows IP information in Linux?", options: ["pwd", "ls", "ip a", "cd"] },
+  { type: "mcq", question: "Which typing feature measures time between keys?", options: ["Flight time", "Hold time", "Scroll time", "Click time"] },
+  { type: "mcq", question: "Which collection stores training baseline?", options: ["alerts", "training", "reports", "analysis_only"] },
+  { type: "mcq", question: "What should happen after repeated fraud warnings?", options: ["Ignore", "Auto logout", "Refresh page", "Change color"] },
 
-  {
-    type: "sentence",
-    question: "Type exactly: Continuous authentication improves security using typing rhythm and mouse behavior."
-  },
-  {
-    type: "sentence",
-    question: "Type exactly: User monitoring detects suspicious activity during online examination sessions."
-  },
-  {
-    type: "sentence",
-    question: "Type exactly: Hold time and flight time are important keystroke dynamics features."
-  },
-  {
-    type: "sentence",
-    question: "Type exactly: MongoDB stores user baseline, alerts, reports, and login activity logs."
-  },
-  {
-    type: "sentence",
-    question: "Type exactly: Tab switching and copy paste detection help prevent exam fraud."
-  },
-  {
-    type: "sentence",
-    question: "Type exactly: The system compares current behavior with previously stored user patterns."
-  },
-  {
-    type: "sentence",
-    question: "Type exactly: Mouse movement speed and click behavior also support user identification."
-  },
-  {
-    type: "sentence",
-    question: "Type exactly: Admin dashboard displays user activity reports and generated fraud alerts."
-  },
-  {
-    type: "sentence",
-    question: "Type exactly: Behavior mismatch warnings increase when the current typing style changes."
-  },
-  {
-    type: "sentence",
-    question: "Type exactly: Repeated abnormal behavior can result in automatic user logout."
-  }
+  { type: "sentence", question: "Type exactly: Continuous authentication improves security using typing rhythm and mouse behavior." },
+  { type: "sentence", question: "Type exactly: User monitoring detects suspicious activity during online examination sessions." },
+  { type: "sentence", question: "Type exactly: Hold time and flight time are important keystroke dynamics features." },
+  { type: "sentence", question: "Type exactly: MongoDB stores user baseline, alerts, reports, and login activity logs." },
+  { type: "sentence", question: "Type exactly: Tab switching and copy paste detection help prevent exam fraud." },
+  { type: "sentence", question: "Type exactly: The system compares current behavior with previously stored user patterns." },
+  { type: "sentence", question: "Type exactly: Mouse movement speed and click behavior also support user identification." },
+  { type: "sentence", question: "Type exactly: Admin dashboard displays user activity reports and generated fraud alerts." },
+  { type: "sentence", question: "Type exactly: Behavior mismatch warnings increase when the current typing style changes." },
+  { type: "sentence", question: "Type exactly: Repeated abnormal behavior can result in automatic user logout." }
 ];
 
 function Exam() {
@@ -115,29 +45,51 @@ function Exam() {
   const [analysisStatus, setAnalysisStatus] = useState("Monitoring...");
   const [submitting, setSubmitting] = useState(false);
 
+  const [notifications, setNotifications] = useState([]);
+  const [warningHistory, setWarningHistory] = useState([]);
+
   const keyDownMapRef = useRef({});
   const lastKeyTimeRef = useRef(null);
   const lastMouseRef = useRef(null);
   const logoutRef = useRef(false);
+  const ignoreBlurRef = useRef(false);
+  const lastPatternAlertRef = useRef(0);
 
   const currentTask = useMemo(() => examTasks[index], [index]);
   const userId = localStorage.getItem("userId") || "user1";
 
+  const addNotification = (message, type = "warning") => {
+    const id = Date.now() + Math.random();
+    setNotifications((prev) => [...prev, { id, message, type }]);
+  };
+
+  const closeNotification = (id) => {
+    ignoreBlurRef.current = true;
+    setNotifications((prev) => prev.filter((n) => n.id !== id));
+    setTimeout(() => {
+      ignoreBlurRef.current = false;
+    }, 500);
+  };
+
+  const pushWarningHistory = (reason, kind = "RULE") => {
+    const entry = {
+      reason,
+      kind,
+      time: new Date().toISOString(),
+      questionNo: index + 1
+    };
+    setWarningHistory((prev) => [...prev, entry]);
+  };
+
   const handleKeyDown = (e) => {
     const now = Date.now();
 
-    setKeys((prev) => [
-      ...prev,
-      { key: e.key, type: "down", time: now }
-    ]);
-
+    setKeys((prev) => [...prev, { key: e.key, type: "down", time: now }]);
     keyDownMapRef.current[e.key] = now;
 
     if (lastKeyTimeRef.current !== null) {
       const flight = now - lastKeyTimeRef.current;
-      if (flight > 0) {
-        setFlightTimes((prev) => [...prev, flight]);
-      }
+      if (flight > 0) setFlightTimes((prev) => [...prev, flight]);
     }
 
     lastKeyTimeRef.current = now;
@@ -146,17 +98,12 @@ function Exam() {
   const handleKeyUp = (e) => {
     const now = Date.now();
 
-    setKeys((prev) => [
-      ...prev,
-      { key: e.key, type: "up", time: now }
-    ]);
+    setKeys((prev) => [...prev, { key: e.key, type: "up", time: now }]);
 
     const downTime = keyDownMapRef.current[e.key];
     if (downTime) {
       const hold = now - downTime;
-      if (hold > 0) {
-        setHoldTimes((prev) => [...prev, hold]);
-      }
+      if (hold > 0) setHoldTimes((prev) => [...prev, hold]);
     }
   };
 
@@ -182,7 +129,7 @@ function Exam() {
     lastMouseRef.current = { x: e.clientX, y: e.clientY, time: now };
   };
 
-  const handleClick = (e) => {
+  const handleNormalClick = (e) => {
     setClicks((prev) => [
       ...prev,
       { type: "click", x: e.clientX, y: e.clientY, button: e.button, time: Date.now() }
@@ -199,8 +146,7 @@ function Exam() {
   const addGeneralWarning = async (reason) => {
     const nextWarnings = warnings + 1;
     setWarnings(nextWarnings);
-
-    alert(`Warning ${nextWarnings}/3: ${reason}`);
+    pushWarningHistory(reason, "RULE");
 
     if (reason === "COPY" || reason === "PASTE") {
       setCopyPaste((prev) => prev + 1);
@@ -210,23 +156,36 @@ function Exam() {
       setTabSwitch((prev) => prev + 1);
     }
 
-    if (nextWarnings >= 3 && !logoutRef.current) {
+    addNotification(`Warning ${nextWarnings}: ${reason}`, "warning");
+
+    // 1,2,3 warning மட்டும்
+    // 4th time logout
+    if (nextWarnings > 3 && !logoutRef.current) {
       logoutRef.current = true;
       await saveExamReport("FRAUD_AUTO_LOGOUT");
-      alert("3 warnings reached. You are logged out.");
-      window.location.href = "/";
+      addNotification("Too many suspicious actions. Auto logout.", "error");
+
+      setTimeout(() => {
+        window.location.href = "/";
+      }, 1200);
     }
   };
 
-  const addPatternWarning = async () => {
+  const addPatternWarning = async (reason = "PATTERN_MISMATCH") => {
     const nextPatternWarnings = patternWarnings + 1;
     setPatternWarnings(nextPatternWarnings);
+    pushWarningHistory(reason, "PATTERN");
 
-    if (nextPatternWarnings >= 3 && !logoutRef.current) {
+    addNotification(`Pattern Warning ${nextPatternWarnings}: ${reason}`, "warning");
+
+    if (nextPatternWarnings > 3 && !logoutRef.current) {
       logoutRef.current = true;
       await saveExamReport("PATTERN_AUTO_LOGOUT");
-      alert("Repeated typing pattern mismatch detected. Auto logout.");
-      window.location.href = "/";
+      addNotification("Repeated pattern mismatch detected. Auto logout.", "error");
+
+      setTimeout(() => {
+        window.location.href = "/";
+      }, 1200);
     }
   };
 
@@ -253,6 +212,7 @@ function Exam() {
     };
 
     const onBlur = () => {
+      if (ignoreBlurRef.current) return;
       addGeneralWarning("WINDOW_BLUR");
     };
 
@@ -317,11 +277,7 @@ function Exam() {
       });
 
       const data = await res.json();
-
-      if (!res.ok) {
-        console.error(data);
-        return null;
-      }
+      if (!res.ok) return null;
 
       setAnalysisStatus(
         `Status: ${data.status} | Risk: ${data.riskScore} | Similarity: ${
@@ -330,25 +286,35 @@ function Exam() {
       );
 
       if (Array.isArray(data.alerts)) {
-        const hasPatternMismatch =
-          data.alerts.includes("AI_MISMATCH") ||
-          data.alerts.includes("LOW_SIMILARITY") ||
-          data.alerts.includes("HOLD_TIME_CHANGED") ||
-          data.alerts.includes("FLIGHT_TIME_CHANGED") ||
-          data.alerts.includes("TYPING_ACTIVITY_LOW") ||
-          data.alerts.includes("MOUSE_SPEED_CHANGED") ||
-          data.alerts.includes("MOUSE_ACTIVITY_LOW");
+        const patternReasons = [
+          "AI_MISMATCH",
+          "LOW_SIMILARITY",
+          "HOLD_TIME_CHANGED",
+          "FLIGHT_TIME_CHANGED",
+          "TYPING_ACTIVITY_LOW",
+          "MOUSE_SPEED_CHANGED",
+          "MOUSE_ACTIVITY_LOW"
+        ];
 
-        if (hasPatternMismatch) {
-          await addPatternWarning();
+        const foundReason = data.alerts.find((x) => patternReasons.includes(x));
+
+        if (foundReason) {
+          const now = Date.now();
+          if (now - lastPatternAlertRef.current > 4000) {
+            lastPatternAlertRef.current = now;
+            await addPatternWarning(foundReason);
+          }
         }
       }
 
       if (data.status === "FRAUD" && !logoutRef.current) {
         logoutRef.current = true;
         await saveExamReport("FRAUD");
-        alert("AI detected fraud. Auto logout.");
-        window.location.href = "/";
+        addNotification("Fraud detected. Auto logout.", "error");
+
+        setTimeout(() => {
+          window.location.href = "/";
+        }, 1200);
       }
 
       return data;
@@ -380,7 +346,8 @@ function Exam() {
           userId,
           warnings: warnings + patternWarnings,
           result,
-          log: finalAnswers
+          log: finalAnswers,
+          warningDetails: warningHistory
         })
       });
     } catch (error) {
@@ -393,10 +360,7 @@ function Exam() {
     setAllAnswers(updated);
 
     const analysis = await analyzeBehavior(updated);
-
-    if (analysis?.status === "FRAUD") {
-      return;
-    }
+    if (analysis?.status === "FRAUD") return;
 
     if (index < examTasks.length - 1) {
       setIndex((prev) => prev + 1);
@@ -412,11 +376,14 @@ function Exam() {
       setSubmitting(true);
       await analyzeBehavior(finalAnswers);
       await saveExamReport("SUBMITTED", finalAnswers);
-      alert("Exam submitted successfully");
-      window.location.href = "/user";
+      addNotification("Exam submitted successfully", "success");
+
+      setTimeout(() => {
+        window.location.href = "/user";
+      }, 1000);
     } catch (error) {
       console.error(error);
-      alert("Error submitting exam");
+      addNotification("Error submitting exam", "error");
     } finally {
       setSubmitting(false);
     }
@@ -426,11 +393,40 @@ function Exam() {
     <div
       className="min-h-screen bg-gray-100 p-6"
       onMouseMove={handleMouseMove}
-      onClick={handleClick}
+      onClick={handleNormalClick}
       onWheel={handleWheel}
     >
+      <div className="fixed top-4 right-4 z-50 space-y-3">
+        {notifications.map((n) => (
+          <div
+            key={n.id}
+            className={`w-80 rounded-xl shadow-lg p-4 text-white ${
+              n.type === "error"
+                ? "bg-red-600"
+                : n.type === "success"
+                ? "bg-green-600"
+                : "bg-yellow-600"
+            }`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="font-medium">{n.message}</div>
+              <button
+                type="button"
+                onMouseDown={() => {
+                  ignoreBlurRef.current = true;
+                }}
+                onClick={() => closeNotification(n.id)}
+                className="bg-white/20 px-2 py-1 rounded"
+              >
+                X
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+
       <div className="max-w-5xl mx-auto bg-white rounded-xl shadow p-6">
-        <h1 className="text-2xl font-bold text-red-600 mb-4">Exam Module</h1>
+        <h1 className="text-2xl font-bold text-red-700 mb-4">Exam Module</h1>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-6">
           <div className="bg-red-50 p-3 rounded">Rule Warnings: {warnings}</div>
@@ -449,6 +445,7 @@ function Exam() {
             {currentTask.options.map((opt, i) => (
               <button
                 key={i}
+                type="button"
                 onClick={() => setSelectedOption(opt)}
                 className={`block w-full text-left border rounded p-3 ${
                   selectedOption === opt ? "bg-green-100 border-green-500" : ""

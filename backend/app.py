@@ -389,6 +389,9 @@ def login():
 
     user = db.users.find_one({"username": username})
 
+    if user and user.get("isBlocked", False):
+        return jsonify({"error": "Your account has been blocked by admin"}), 403
+
     if user and bcrypt.checkpw(password.encode(), user["password"]):
         has_baseline = db.training.find_one({"userId": username}) is not None
 
@@ -591,6 +594,7 @@ def save_exam():
     log = data.get("log", [])
     warnings = int(data.get("warnings", 0))
     result = data.get("result", "UNKNOWN")
+    warning_details = data.get("warningDetails", [])
 
     if not user_id:
         return jsonify({"error": "userId required"}), 400
@@ -600,6 +604,7 @@ def save_exam():
         "log": log,
         "warnings": warnings,
         "result": result,
+        "warningDetails": warning_details,
         "createdAt": datetime.utcnow()
     })
 
@@ -698,7 +703,40 @@ def get_stats():
         "genuineCount": genuine_count
     })
 
+@app.route("/api/admin/block-user/<username>", methods=["POST"])
+def block_user(username):
+    ok, resp, code = db_required()
+    if not ok:
+        return resp, code
 
+    result = db.users.update_one(
+        {"username": username},
+        {"$set": {"isBlocked": True, "blockedAt": datetime.utcnow()}}
+    )
+
+    if result.matched_count == 0:
+        return jsonify({"error": "User not found"}), 404
+
+    save_alert(username, "BLOCKED", f"User {username} was blocked by admin")
+    return jsonify({"message": "User blocked successfully"})
+
+
+@app.route("/api/admin/unblock-user/<username>", methods=["POST"])
+def unblock_user(username):
+    ok, resp, code = db_required()
+    if not ok:
+        return resp, code
+
+    result = db.users.update_one(
+        {"username": username},
+        {"$set": {"isBlocked": False}, "$unset": {"blockedAt": ""}}
+    )
+
+    if result.matched_count == 0:
+        return jsonify({"error": "User not found"}), 404
+
+    save_alert(username, "UNBLOCKED", f"User {username} was unblocked by admin")
+    return jsonify({"message": "User unblocked successfully"})
 # =========================================
 # Run App
 # =========================================

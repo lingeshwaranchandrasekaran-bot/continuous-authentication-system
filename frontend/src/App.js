@@ -1,38 +1,82 @@
 import React from "react";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
+// Main Pages
 import Login from "./pages/Login";
-import Dashboard from "./pages/Dashboard";
 import AdminDashboard from "./pages/AdminDashboard";
-import Monitor from "./pages/Monitor";
-import Alerts from "./pages/Alerts";
 import UserDashboard from "./pages/UserDashboard";
 import Training from "./pages/Training";
 import Exam from "./pages/Exam";
+
+/**
+ * Simple Protected Route
+ */
+const ProtectedRoute = ({ children, roleRequired }) => {
+  const user = localStorage.getItem("userId");
+  const role = localStorage.getItem("role");
+
+  if (!user) {
+    return <Navigate to="/" />;
+  }
+
+  if (roleRequired && role !== roleRequired) {
+    return <Navigate to="/" />;
+  }
+
+  return children;
+};
 
 function App() {
   return (
     <BrowserRouter>
       <Routes>
-        {/* Login */}
+
+        {/* 🔐 Login */}
         <Route path="/" element={<Login />} />
 
-        {/* Admin */}
-        <Route path="/admin" element={<AdminDashboard />} />
+        {/* 👨‍💼 Admin Dashboard */}
+        <Route
+          path="/admin"
+          element={
+            <ProtectedRoute roleRequired="admin">
+              <AdminDashboard />
+            </ProtectedRoute>
+          }
+        />
 
-        {/* User */}
-        <Route path="/user" element={<UserDashboard />} />
+        {/* 👤 User Dashboard */}
+        <Route
+          path="/user"
+          element={
+            <ProtectedRoute>
+              <UserDashboard />
+            </ProtectedRoute>
+          }
+        />
 
-        {/* Training */}
-        <Route path="/training" element={<Training />} />
+        {/* 🧠 Training */}
+        <Route
+          path="/training"
+          element={
+            <ProtectedRoute>
+              <Training />
+            </ProtectedRoute>
+          }
+        />
 
-        {/* Exam */}
-        <Route path="/exam" element={<Exam />} />
+        {/* 📝 Exam */}
+        <Route
+          path="/exam"
+          element={
+            <ProtectedRoute>
+              <Exam />
+            </ProtectedRoute>
+          }
+        />
 
-        {/* Optional pages */}
-        <Route path="/monitor" element={<Monitor />} />
-        <Route path="/alerts" element={<Alerts />} />
-        <Route path="/dashboard" element={<Dashboard />} />
+        {/* ❌ Unknown route redirect */}
+        <Route path="*" element={<Navigate to="/" />} />
+
       </Routes>
     </BrowserRouter>
   );
