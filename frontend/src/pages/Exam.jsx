@@ -1,31 +1,102 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
 const examTasks = [
-  { type: "mcq", question: "Which model is used in this project for user behavior comparison?", options: ["CNN", "Siamese Neural Network", "KNN", "Naive Bayes"] },
-  { type: "mcq", question: "Which database is used in this system?", options: ["MySQL", "MongoDB", "Oracle", "SQLite"] },
-  { type: "mcq", question: "Which feature measures how long a key is pressed?", options: ["Flight time", "Hold time", "Mouse speed", "Latency"] },
-  { type: "mcq", question: "Which frontend framework is used here?", options: ["React", "Django", "Flask", "Spring"] },
-  { type: "mcq", question: "Which suspicious action is checked during exam?", options: ["Copy paste", "Tab switch", "Window blur", "All of the above"] },
-  { type: "mcq", question: "Which backend framework is used?", options: ["Laravel", "Flask", "Angular", "Express only"] },
-  { type: "mcq", question: "Which command shows IP information in Linux?", options: ["pwd", "ls", "ip a", "cd"] },
-  { type: "mcq", question: "Which typing feature measures time between keys?", options: ["Flight time", "Hold time", "Scroll time", "Click time"] },
-  { type: "mcq", question: "Which collection stores training baseline?", options: ["alerts", "training", "reports", "analysis_only"] },
-  { type: "mcq", question: "What should happen after repeated fraud warnings?", options: ["Ignore", "Auto logout", "Refresh page", "Change color"] },
+  {
+    type: "mcq",
+    question: "Which model is used in this project for user behavior comparison?",
+    options: ["CNN", "Siamese Neural Network", "KNN", "Naive Bayes"]
+  },
+  {
+    type: "mcq",
+    question: "Which database is used in this system?",
+    options: ["MySQL", "MongoDB", "Oracle", "SQLite"]
+  },
+  {
+    type: "mcq",
+    question: "Which feature measures how long a key is pressed?",
+    options: ["Flight time", "Hold time", "Mouse speed", "Latency"]
+  },
+  {
+    type: "mcq",
+    question: "Which frontend framework is used here?",
+    options: ["React", "Django", "Flask", "Spring"]
+  },
+  {
+    type: "mcq",
+    question: "Which suspicious action is checked during exam?",
+    options: ["Copy paste", "Tab switch", "Window blur", "All of the above"]
+  },
+  {
+    type: "mcq",
+    question: "Which backend framework is used?",
+    options: ["Laravel", "Flask", "Angular", "Express only"]
+  },
+  {
+    type: "mcq",
+    question: "Which command shows IP information in Linux?",
+    options: ["pwd", "ls", "ip a", "cd"] 
+  },
+  {
+    type: "mcq",
+    question: "Which typing feature measures time between keys?",
+    options: ["Flight time", "Hold time", "Scroll time", "Click time"]
+  },
+  {
+    type: "mcq",
+    question: "Which collection stores training baseline?",
+    options: ["alerts", "training", "reports", "analysis_only"]
+  },
+  {
+    type: "mcq",
+    question: "What should happen after repeated fraud warnings?",
+    options: ["Ignore", "Auto logout", "Refresh page", "Change color"]
+  },
 
-  { type: "sentence", question: "Type exactly: Continuous authentication improves security using typing rhythm and mouse behavior." },
-  { type: "sentence", question: "Type exactly: User monitoring detects suspicious activity during online examination sessions." },
-  { type: "sentence", question: "Type exactly: Hold time and flight time are important keystroke dynamics features." },
-  { type: "sentence", question: "Type exactly: MongoDB stores user baseline, alerts, reports, and login activity logs." },
-  { type: "sentence", question: "Type exactly: Tab switching and copy paste detection help prevent exam fraud." },
-  { type: "sentence", question: "Type exactly: The system compares current behavior with previously stored user patterns." },
-  { type: "sentence", question: "Type exactly: Mouse movement speed and click behavior also support user identification." },
-  { type: "sentence", question: "Type exactly: Admin dashboard displays user activity reports and generated fraud alerts." },
-  { type: "sentence", question: "Type exactly: Behavior mismatch warnings increase when the current typing style changes." },
-  { type: "sentence", question: "Type exactly: Repeated abnormal behavior can result in automatic user logout." }
+  {
+    type: "sentence",
+    question: "Type exactly: Continuous authentication improves security using typing rhythm and mouse behavior."
+  },
+  {
+    type: "sentence",
+    question: "Type exactly: User monitoring detects suspicious activity during online examination sessions."
+  },
+  {
+    type: "sentence",
+    question: "Type exactly: Hold time and flight time are important keystroke dynamics features."
+  },
+  {
+    type: "sentence",
+    question: "Type exactly: MongoDB stores user baseline, alerts, reports, and login activity logs."
+  },
+  {
+    type: "sentence",
+    question: "Type exactly: Tab switching and copy paste detection help prevent exam fraud."
+  },
+  {
+    type: "sentence",
+    question: "Type exactly: The system compares current behavior with previously stored user patterns."
+  },
+  {
+    type: "sentence",
+    question: "Type exactly: Mouse movement speed and click behavior also support user identification."
+  },
+  {
+    type: "sentence",
+    question: "Type exactly: Admin dashboard displays user activity reports and generated fraud alerts."
+  },
+  {
+    type: "sentence",
+    question: "Type exactly: Behavior mismatch warnings increase when the current typing style changes."
+  },
+  {
+    type: "sentence",
+    question: "Type exactly: Repeated abnormal behavior can result in automatic user logout."
+  }
 ];
 
 function Exam() {
   const [index, setIndex] = useState(0);
+
   const [warnings, setWarnings] = useState(0);
   const [patternWarnings, setPatternWarnings] = useState(0);
   const [copyPaste, setCopyPaste] = useState(0);
@@ -66,6 +137,7 @@ function Exam() {
   const closeNotification = (id) => {
     ignoreBlurRef.current = true;
     setNotifications((prev) => prev.filter((n) => n.id !== id));
+
     setTimeout(() => {
       ignoreBlurRef.current = false;
     }, 500);
@@ -89,7 +161,9 @@ function Exam() {
 
     if (lastKeyTimeRef.current !== null) {
       const flight = now - lastKeyTimeRef.current;
-      if (flight > 0) setFlightTimes((prev) => [...prev, flight]);
+      if (flight > 0) {
+        setFlightTimes((prev) => [...prev, flight]);
+      }
     }
 
     lastKeyTimeRef.current = now;
@@ -103,7 +177,9 @@ function Exam() {
     const downTime = keyDownMapRef.current[e.key];
     if (downTime) {
       const hold = now - downTime;
-      if (hold > 0) setHoldTimes((prev) => [...prev, hold]);
+      if (hold > 0) {
+        setHoldTimes((prev) => [...prev, hold]);
+      }
     }
   };
 
@@ -146,7 +222,9 @@ function Exam() {
   const addGeneralWarning = async (reason) => {
     const nextWarnings = warnings + 1;
     setWarnings(nextWarnings);
+
     pushWarningHistory(reason, "RULE");
+    addNotification(`Warning ${nextWarnings}: ${reason}`, "warning");
 
     if (reason === "COPY" || reason === "PASTE") {
       setCopyPaste((prev) => prev + 1);
@@ -156,10 +234,8 @@ function Exam() {
       setTabSwitch((prev) => prev + 1);
     }
 
-    addNotification(`Warning ${nextWarnings}: ${reason}`, "warning");
-
-    // 1,2,3 warning மட்டும்
-    // 4th time logout
+    // 1,2,3 warning மட்டும் show
+    // 4th warning வந்தா logout
     if (nextWarnings > 3 && !logoutRef.current) {
       logoutRef.current = true;
       await saveExamReport("FRAUD_AUTO_LOGOUT");
@@ -174,14 +250,16 @@ function Exam() {
   const addPatternWarning = async (reason = "PATTERN_MISMATCH") => {
     const nextPatternWarnings = patternWarnings + 1;
     setPatternWarnings(nextPatternWarnings);
-    pushWarningHistory(reason, "PATTERN");
 
+    pushWarningHistory(reason, "PATTERN");
     addNotification(`Pattern Warning ${nextPatternWarnings}: ${reason}`, "warning");
 
+    // 1,2,3 மட்டும் show
+    // 4th pattern warning வந்தா logout
     if (nextPatternWarnings > 3 && !logoutRef.current) {
       logoutRef.current = true;
       await saveExamReport("PATTERN_AUTO_LOGOUT");
-      addNotification("Repeated pattern mismatch detected. Auto logout.", "error");
+      addNotification("Repeated typing mismatch detected. Auto logout.", "error");
 
       setTimeout(() => {
         window.location.href = "/";
@@ -277,11 +355,17 @@ function Exam() {
       });
 
       const data = await res.json();
-      if (!res.ok) return null;
+
+      if (!res.ok) {
+        console.error(data);
+        return null;
+      }
 
       setAnalysisStatus(
         `Status: ${data.status} | Risk: ${data.riskScore} | Similarity: ${
-          typeof data.similarity === "number" ? data.similarity.toFixed(3) : data.similarity
+          typeof data.similarity === "number"
+            ? data.similarity.toFixed(3)
+            : data.similarity
         }`
       );
 
@@ -307,14 +391,10 @@ function Exam() {
         }
       }
 
-      if (data.status === "FRAUD" && !logoutRef.current) {
-        logoutRef.current = true;
-        await saveExamReport("FRAUD");
-        addNotification("Fraud detected. Auto logout.", "error");
-
-        setTimeout(() => {
-          window.location.href = "/";
-        }, 1200);
+      // direct logout வேண்டாம்
+      // only warning flow follow பண்ணணும்
+      if (data.status === "FRAUD") {
+        addNotification("Fraud risk detected. Please continue carefully.", "warning");
       }
 
       return data;
@@ -333,7 +413,18 @@ function Exam() {
     }, 5000);
 
     return () => clearInterval(interval);
-  }, [allAnswers, keys, mouse, clicks, holdTimes, flightTimes, mouseSpeeds, copyPaste, tabSwitch, warnings]);
+  }, [
+    allAnswers,
+    keys,
+    mouse,
+    clicks,
+    holdTimes,
+    flightTimes,
+    mouseSpeeds,
+    copyPaste,
+    tabSwitch,
+    warnings
+  ]);
 
   const saveExamReport = async (result = "SUBMITTED", finalAnswers = allAnswers) => {
     try {
@@ -359,8 +450,7 @@ function Exam() {
     const updated = [...allAnswers, buildCurrentSample()];
     setAllAnswers(updated);
 
-    const analysis = await analyzeBehavior(updated);
-    if (analysis?.status === "FRAUD") return;
+    await analyzeBehavior(updated);
 
     if (index < examTasks.length - 1) {
       setIndex((prev) => prev + 1);
@@ -483,7 +573,9 @@ function Exam() {
           className="bg-blue-600 text-white px-5 py-2 rounded hover:bg-blue-700 disabled:opacity-50"
         >
           {index === examTasks.length - 1
-            ? submitting ? "Submitting..." : "Submit Exam"
+            ? submitting
+              ? "Submitting..."
+              : "Submit Exam"
             : "Next"}
         </button>
       </div>
