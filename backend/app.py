@@ -298,6 +298,7 @@ def register():
         "username": username,
         "password": hashed,
         "role": role,
+        "isBlocked": False,
         "createdAt": datetime.utcnow()
     })
 
@@ -334,6 +335,7 @@ def admin_create_user():
         "username": username,
         "password": hashed,
         "role": role,
+        "isBlocked": False,
         "createdAt": datetime.utcnow()
     })
 
@@ -354,6 +356,7 @@ def delete_user(username):
     db.exam.delete_many({"userId": username})
     db.analysis.delete_many({"userId": username})
     db.alerts.delete_many({"userId": username})
+    db.login_logs.delete_many({"username": username})
 
     return jsonify({"message": "User deleted successfully"})
 
@@ -369,6 +372,45 @@ def reset_training(username):
 
     db.training.delete_one({"userId": username})
     return jsonify({"message": "Training reset successful"})
+
+
+# =========================================
+# Admin Block / Unblock User
+# =========================================
+@app.route("/api/admin/block-user/<username>", methods=["POST"])
+def block_user(username):
+    ok, resp, code = db_required()
+    if not ok:
+        return resp, code
+
+    result = db.users.update_one(
+        {"username": username},
+        {"$set": {"isBlocked": True, "blockedAt": datetime.utcnow()}}
+    )
+
+    if result.matched_count == 0:
+        return jsonify({"error": "User not found"}), 404
+
+    save_alert(username, "BLOCKED", f"User {username} was blocked by admin")
+    return jsonify({"message": "User blocked successfully"})
+
+
+@app.route("/api/admin/unblock-user/<username>", methods=["POST"])
+def unblock_user(username):
+    ok, resp, code = db_required()
+    if not ok:
+        return resp, code
+
+    result = db.users.update_one(
+        {"username": username},
+        {"$set": {"isBlocked": False}, "$unset": {"blockedAt": ""}}
+    )
+
+    if result.matched_count == 0:
+        return jsonify({"error": "User not found"}), 404
+
+    save_alert(username, "UNBLOCKED", f"User {username} was unblocked by admin")
+    return jsonify({"message": "User unblocked successfully"})
 
 
 # =========================================
@@ -389,10 +431,13 @@ def login():
 
     user = db.users.find_one({"username": username})
 
-    if user and user.get("isBlocked", False):
+    if not user:
+        return jsonify({"error": "Invalid credentials"}), 401
+
+    if user.get("isBlocked", False):
         return jsonify({"error": "Your account has been blocked by admin"}), 403
 
-    if user and bcrypt.checkpw(password.encode(), user["password"]):
+    if bcrypt.checkpw(password.encode(), user["password"]):
         has_baseline = db.training.find_one({"userId": username}) is not None
 
         db.login_logs.insert_one({
@@ -703,40 +748,7 @@ def get_stats():
         "genuineCount": genuine_count
     })
 
-@app.route("/api/admin/block-user/<username>", methods=["POST"])
-def block_user(username):
-    ok, resp, code = db_required()
-    if not ok:
-        return resp, code
 
-    result = db.users.update_one(
-        {"username": username},
-        {"$set": {"isBlocked": True, "blockedAt": datetime.utcnow()}}
-    )
-
-    if result.matched_count == 0:
-        return jsonify({"error": "User not found"}), 404
-
-    save_alert(username, "BLOCKED", f"User {username} was blocked by admin")
-    return jsonify({"message": "User blocked successfully"})
-
-
-@app.route("/api/admin/unblock-user/<username>", methods=["POST"])
-def unblock_user(username):
-    ok, resp, code = db_required()
-    if not ok:
-        return resp, code
-
-    result = db.users.update_one(
-        {"username": username},
-        {"$set": {"isBlocked": False}, "$unset": {"blockedAt": ""}}
-    )
-
-    if result.matched_count == 0:
-        return jsonify({"error": "User not found"}), 404
-
-    save_alert(username, "UNBLOCKED", f"User {username} was unblocked by admin")
-    return jsonify({"message": "User unblocked successfully"})
 # =========================================
 # Run App
 # =========================================
