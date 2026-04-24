@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   PieChart,
   Pie,
@@ -31,6 +31,10 @@ function AdminDashboard() {
   const [alerts, setAlerts] = useState([]);
   const [loginLogs, setLoginLogs] = useState([]);
 
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [selectedUserData, setSelectedUserData] = useState(null);
+  const [selectedUserTab, setSelectedUserTab] = useState("reports");
+
   const [newUsername, setNewUsername] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newRole, setNewRole] = useState("user");
@@ -40,6 +44,7 @@ function AdminDashboard() {
 
   const [loading, setLoading] = useState(false);
   const [reportDateFilter, setReportDateFilter] = useState("");
+  const [userSearch, setUserSearch] = useState("");
 
   const loadAll = async () => {
     try {
@@ -61,19 +66,12 @@ function AdminDashboard() {
         fetch("http://localhost:5000/api/admin/login-logs"),
       ]);
 
-      const statsData = await statsRes.json();
-      const usersData = await usersRes.json();
-      const reportsData = await reportsRes.json();
-      const analysisData = await analysisRes.json();
-      const alertsData = await alertsRes.json();
-      const loginLogsData = await loginLogsRes.json();
-
-      setStats(statsData || {});
-      setUsers(Array.isArray(usersData) ? usersData : []);
-      setReports(Array.isArray(reportsData) ? reportsData : []);
-      setAnalysis(Array.isArray(analysisData) ? analysisData : []);
-      setAlerts(Array.isArray(alertsData) ? alertsData : []);
-      setLoginLogs(Array.isArray(loginLogsData) ? loginLogsData : []);
+      setStats(await statsRes.json());
+      setUsers(await usersRes.json());
+      setReports(await reportsRes.json());
+      setAnalysis(await analysisRes.json());
+      setAlerts(await alertsRes.json());
+      setLoginLogs(await loginLogsRes.json());
     } catch (error) {
       console.error(error);
       alert("Failed to load admin data");
@@ -86,41 +84,48 @@ function AdminDashboard() {
     loadAll();
   }, []);
 
+  const loadUserDetails = async (username) => {
+    try {
+      const res = await fetch(`http://localhost:5000/api/admin/user-details/${username}`);
+      const data = await res.json();
+
+      if (!res.ok) {
+        alert(data.error || "Failed to load user details");
+        return;
+      }
+
+      setSelectedUser(username);
+      setSelectedUserData(data);
+      setSelectedUserTab("reports");
+    } catch (error) {
+      console.error(error);
+      alert("Failed to load user details");
+    }
+  };
+
   const handleCreateUser = async () => {
     if (!newUsername || !newPassword) {
       alert("Enter username and password");
       return;
     }
 
-    try {
-      const res = await fetch("http://localhost:5000/api/admin/create-user", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          username: newUsername,
-          password: newPassword,
-          role: newRole
-        })
-      });
+    const res = await fetch("http://localhost:5000/api/admin/create-user", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: newUsername, password: newPassword, role: newRole })
+    });
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        alert(data.error || "Failed to create user");
-        return;
-      }
-
-      alert("User created successfully");
-      setNewUsername("");
-      setNewPassword("");
-      setNewRole("user");
-      loadAll();
-    } catch (error) {
-      console.error(error);
-      alert("Create user failed");
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.error || "Failed to create user");
+      return;
     }
+
+    alert("User created successfully");
+    setNewUsername("");
+    setNewPassword("");
+    setNewRole("user");
+    loadAll();
   };
 
   const handleDeleteUser = async () => {
@@ -129,26 +134,19 @@ function AdminDashboard() {
       return;
     }
 
-    try {
-      const res = await fetch(
-        `http://localhost:5000/api/admin/delete-user/${deleteUsername}`,
-        { method: "DELETE" }
-      );
+    const res = await fetch(`http://localhost:5000/api/admin/delete-user/${deleteUsername}`, {
+      method: "DELETE"
+    });
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        alert(data.error || "Delete failed");
-        return;
-      }
-
-      alert("User deleted successfully");
-      setDeleteUsername("");
-      loadAll();
-    } catch (error) {
-      console.error(error);
-      alert("Delete failed");
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.error || "Delete failed");
+      return;
     }
+
+    alert("User deleted successfully");
+    setDeleteUsername("");
+    loadAll();
   };
 
   const handleResetTraining = async () => {
@@ -157,26 +155,19 @@ function AdminDashboard() {
       return;
     }
 
-    try {
-      const res = await fetch(
-        `http://localhost:5000/api/admin/reset-training/${resetUsername}`,
-        { method: "POST" }
-      );
+    const res = await fetch(`http://localhost:5000/api/admin/reset-training/${resetUsername}`, {
+      method: "POST"
+    });
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        alert(data.error || "Reset failed");
-        return;
-      }
-
-      alert("Training reset successful");
-      setResetUsername("");
-      loadAll();
-    } catch (error) {
-      console.error(error);
-      alert("Reset failed");
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.error || "Reset failed");
+      return;
     }
+
+    alert("Training reset successful");
+    setResetUsername("");
+    loadAll();
   };
 
   const handleAddSentence = async () => {
@@ -185,75 +176,65 @@ function AdminDashboard() {
       return;
     }
 
-    try {
-      const res = await fetch("http://localhost:5000/api/admin/add-sentence", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          sentence: newSentence
-        })
-      });
+    const res = await fetch("http://localhost:5000/api/admin/add-sentence", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ sentence: newSentence })
+    });
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        alert(data.error || "Failed to add sentence");
-        return;
-      }
-
-      alert("Sentence added successfully");
-      setNewSentence("");
-    } catch (error) {
-      console.error(error);
-      alert("Failed to add sentence");
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.error || "Failed to add sentence");
+      return;
     }
+
+    alert("Sentence added successfully");
+    setNewSentence("");
   };
 
   const handleBlockUser = async (username) => {
-    try {
-      const res = await fetch(
-        `http://localhost:5000/api/admin/block-user/${username}`,
-        { method: "POST" }
-      );
+    const res = await fetch(`http://localhost:5000/api/admin/block-user/${username}`, {
+      method: "POST"
+    });
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        alert(data.error || "Block failed");
-        return;
-      }
-
-      alert("User blocked successfully");
-      loadAll();
-    } catch (error) {
-      console.error(error);
-      alert("Block failed");
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.error || "Block failed");
+      return;
     }
+
+    alert("User blocked successfully");
+    loadAll();
+    if (selectedUser === username) loadUserDetails(username);
   };
 
   const handleUnblockUser = async (username) => {
-    try {
-      const res = await fetch(
-        `http://localhost:5000/api/admin/unblock-user/${username}`,
-        { method: "POST" }
-      );
+    const res = await fetch(`http://localhost:5000/api/admin/unblock-user/${username}`, {
+      method: "POST"
+    });
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        alert(data.error || "Unblock failed");
-        return;
-      }
-
-      alert("User unblocked successfully");
-      loadAll();
-    } catch (error) {
-      console.error(error);
-      alert("Unblock failed");
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.error || "Unblock failed");
+      return;
     }
+
+    alert("User unblocked successfully");
+    loadAll();
+    if (selectedUser === username) loadUserDetails(username);
   };
+
+  const handleDownloadPdf = (username) => {
+    window.open(`http://localhost:5000/api/admin/user-report-pdf/${username}`, "_blank");
+  };
+
+  const filteredUsers = useMemo(() => {
+    return users.filter((u) =>
+      u.username?.toLowerCase().includes(userSearch.toLowerCase())
+    );
+  }, [users, userSearch]);
 
   const pieData = [
     { name: "Genuine", value: stats.genuineCount || 0 },
@@ -272,9 +253,9 @@ function AdminDashboard() {
   const SidebarButton = ({ label, value }) => (
     <button
       onClick={() => setActiveTab(value)}
-      className={`w-full text-left px-4 py-3 rounded-xl transition mb-2 ${
+      className={`w-full text-left px-4 py-3 rounded-xl transition mb-2 font-medium ${
         activeTab === value
-          ? "bg-blue-600 text-white"
+          ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow"
           : "bg-gray-100 hover:bg-gray-200 text-gray-800"
       }`}
     >
@@ -282,28 +263,162 @@ function AdminDashboard() {
     </button>
   );
 
+  const DetailTab = ({ label, value }) => (
+    <button
+      onClick={() => setSelectedUserTab(value)}
+      className={`px-4 py-2 rounded-lg ${
+        selectedUserTab === value
+          ? "bg-blue-600 text-white"
+          : "bg-gray-100 text-gray-700"
+      }`}
+    >
+      {label}
+    </button>
+  );
+
+  const renderSelectedUserPanel = () => {
+    if (!selectedUserData || !selectedUserData.user) {
+      return (
+        <div className="bg-white rounded-2xl shadow border p-6">
+          <h3 className="text-xl font-bold mb-2">User Details</h3>
+          <p className="text-gray-500">Click a username to view reports, alerts, activity, and login history.</p>
+        </div>
+      );
+    }
+
+    const user = selectedUserData.user;
+    const reports = selectedUserData.reports || [];
+    const alerts = selectedUserData.alerts || [];
+    const analysis = selectedUserData.analysis || [];
+    const logins = selectedUserData.logins || [];
+
+    return (
+      <div className="bg-white rounded-2xl shadow border p-6">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-5">
+          <div>
+            <h3 className="text-2xl font-bold text-blue-700">{user.username}</h3>
+            <p className="text-gray-600">Role: {user.role}</p>
+            <p className="text-gray-600">Status: {user.isBlocked ? "Blocked" : "Active"}</p>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => handleDownloadPdf(user.username)}
+              className="bg-purple-600 text-white px-4 py-2 rounded-lg"
+            >
+              Download PDF
+            </button>
+
+            {user.isBlocked ? (
+              <button
+                onClick={() => handleUnblockUser(user.username)}
+                className="bg-green-600 text-white px-4 py-2 rounded-lg"
+              >
+                Unblock
+              </button>
+            ) : (
+              <button
+                onClick={() => handleBlockUser(user.username)}
+                className="bg-red-600 text-white px-4 py-2 rounded-lg"
+              >
+                Block
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2 mb-5">
+          <DetailTab label="Reports" value="reports" />
+          <DetailTab label="Alerts" value="alerts" />
+          <DetailTab label="Analysis" value="analysis" />
+          <DetailTab label="Logins" value="logins" />
+        </div>
+
+        {selectedUserTab === "reports" && (
+          <div className="space-y-3">
+            {reports.length === 0 && <p className="text-gray-500">No reports found</p>}
+            {reports.map((r, i) => (
+              <div key={i} className="border rounded-xl p-4 bg-gray-50">
+                <p><span className="font-semibold">Result:</span> {r.result}</p>
+                <p><span className="font-semibold">Warnings:</span> {r.warnings}</p>
+                <p><span className="font-semibold">Time:</span> {r.createdAt ? new Date(r.createdAt).toLocaleString() : "N/A"}</p>
+
+                {Array.isArray(r.warningDetails) && r.warningDetails.length > 0 && (
+                  <div className="mt-3 space-y-2">
+                    {r.warningDetails.map((w, idx) => (
+                      <div key={idx} className="bg-red-50 border rounded-lg p-3">
+                        <p><span className="font-medium">Type:</span> {w.kind}</p>
+                        <p><span className="font-medium">Reason:</span> {w.reason}</p>
+                        <p><span className="font-medium">Question No:</span> {w.questionNo}</p>
+                        <p><span className="font-medium">Time:</span> {w.time ? new Date(w.time).toLocaleString() : "N/A"}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {selectedUserTab === "alerts" && (
+          <div className="space-y-3">
+            {alerts.length === 0 && <p className="text-gray-500">No alerts found</p>}
+            {alerts.map((a, i) => (
+              <div key={i} className="border rounded-xl p-4 bg-red-50">
+                <p><span className="font-semibold">Type:</span> {a.type}</p>
+                <p><span className="font-semibold">Message:</span> {a.message}</p>
+                <p><span className="font-semibold">Time:</span> {a.createdAt ? new Date(a.createdAt).toLocaleString() : "N/A"}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {selectedUserTab === "analysis" && (
+          <div className="space-y-3">
+            {analysis.length === 0 && <p className="text-gray-500">No analysis logs found</p>}
+            {analysis.map((a, i) => (
+              <div key={i} className="border rounded-xl p-4 bg-yellow-50">
+                <p><span className="font-semibold">Status:</span> {a.status}</p>
+                <p><span className="font-semibold">Similarity:</span> {typeof a.similarity === "number" ? a.similarity.toFixed(3) : a.similarity}</p>
+                <p><span className="font-semibold">Risk Score:</span> {a.riskScore}</p>
+                <p><span className="font-semibold">Alerts:</span> {Array.isArray(a.alerts) ? a.alerts.join(", ") : ""}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {selectedUserTab === "logins" && (
+          <div className="space-y-3">
+            {logins.length === 0 && <p className="text-gray-500">No login logs found</p>}
+            {logins.map((l, i) => (
+              <div key={i} className="border rounded-xl p-4 bg-blue-50">
+                <p><span className="font-semibold">Role:</span> {l.role}</p>
+                <p><span className="font-semibold">Login Time:</span> {l.loginAt ? new Date(l.loginAt).toLocaleString() : "N/A"}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderDashboard = () => (
-    <div>
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-bold">Dashboard Overview</h2>
-        <button
-          onClick={loadAll}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
-        >
-          {loading ? "Refreshing..." : "Refresh"}
-        </button>
+    <div className="space-y-6">
+      <div className="bg-gradient-to-r from-blue-700 to-indigo-700 text-white rounded-2xl p-6 shadow">
+        <h2 className="text-3xl font-bold">Admin Overview</h2>
+        <p className="mt-2 text-blue-100">Monitor users, reports, alerts, and behavioral activity in one place.</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        <div className="bg-white rounded-2xl shadow p-5 border">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="bg-white rounded-2xl shadow p-5 border-l-4 border-blue-600">
           <p className="text-sm text-gray-500">Total Users</p>
           <h3 className="text-3xl font-bold text-blue-700">{stats.totalUsers}</h3>
         </div>
-        <div className="bg-white rounded-2xl shadow p-5 border">
+        <div className="bg-white rounded-2xl shadow p-5 border-l-4 border-green-600">
           <p className="text-sm text-gray-500">Total Reports</p>
           <h3 className="text-3xl font-bold text-green-700">{stats.totalReports}</h3>
         </div>
-        <div className="bg-white rounded-2xl shadow p-5 border">
+        <div className="bg-white rounded-2xl shadow p-5 border-l-4 border-red-600">
           <p className="text-sm text-gray-500">Total Alerts</p>
           <h3 className="text-3xl font-bold text-red-700">{stats.totalAlerts}</h3>
         </div>
@@ -343,133 +458,83 @@ function AdminDashboard() {
   );
 
   const renderUsers = () => (
-    <div className="space-y-6">
-      <div className="bg-white rounded-2xl shadow border p-5">
-        <h3 className="text-xl font-bold mb-4">Create User</h3>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          <input
-            className="border rounded-lg p-3"
-            placeholder="Username"
-            value={newUsername}
-            onChange={(e) => setNewUsername(e.target.value)}
-          />
-          <input
-            className="border rounded-lg p-3"
-            placeholder="Password"
-            value={newPassword}
-            onChange={(e) => setNewPassword(e.target.value)}
-          />
-          <select
-            className="border rounded-lg p-3"
-            value={newRole}
-            onChange={(e) => setNewRole(e.target.value)}
-          >
-            <option value="user">User</option>
-            <option value="admin">Admin</option>
-          </select>
-          <button
-            onClick={handleCreateUser}
-            className="bg-green-600 text-white rounded-lg p-3 hover:bg-green-700"
-          >
+    <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+      <div className="space-y-6">
+        <div className="bg-white rounded-2xl shadow border p-5">
+          <h3 className="text-xl font-bold mb-4">Create User</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <input className="border rounded-lg p-3" placeholder="Username" value={newUsername} onChange={(e) => setNewUsername(e.target.value)} />
+            <input className="border rounded-lg p-3" placeholder="Password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+            <select className="border rounded-lg p-3" value={newRole} onChange={(e) => setNewRole(e.target.value)}>
+              <option value="user">User</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+          <button onClick={handleCreateUser} className="mt-4 bg-green-600 text-white rounded-lg px-4 py-3">
             Create User
           </button>
         </div>
-      </div>
 
-      <div className="bg-white rounded-2xl shadow border p-5">
-        <h3 className="text-xl font-bold mb-4">Delete User</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <input
-            className="border rounded-lg p-3"
-            placeholder="Username to delete"
-            value={deleteUsername}
-            onChange={(e) => setDeleteUsername(e.target.value)}
-          />
-          <button
-            onClick={handleDeleteUser}
-            className="bg-red-600 text-white rounded-lg p-3 hover:bg-red-700"
-          >
-            Delete User
-          </button>
+        <div className="bg-white rounded-2xl shadow border p-5">
+          <h3 className="text-xl font-bold mb-4">Delete User</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <input className="border rounded-lg p-3" placeholder="Username to delete" value={deleteUsername} onChange={(e) => setDeleteUsername(e.target.value)} />
+            <button onClick={handleDeleteUser} className="bg-red-600 text-white rounded-lg p-3">
+              Delete User
+            </button>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl shadow border p-5">
+          <h3 className="text-xl font-bold mb-4">Reset Training</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <input className="border rounded-lg p-3" placeholder="Username to reset training" value={resetUsername} onChange={(e) => setResetUsername(e.target.value)} />
+            <button onClick={handleResetTraining} className="bg-yellow-500 text-white rounded-lg p-3">
+              Reset Training
+            </button>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl shadow border p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-xl font-bold">Users</h3>
+            <input
+              className="border rounded-lg p-2"
+              placeholder="Search user..."
+              value={userSearch}
+              onChange={(e) => setUserSearch(e.target.value)}
+            />
+          </div>
+
+          <div className="space-y-3 max-h-[500px] overflow-y-auto">
+            {filteredUsers.map((u, i) => (
+              <div
+                key={i}
+                onClick={() => loadUserDetails(u.username)}
+                className={`border rounded-xl p-4 cursor-pointer transition ${
+                  selectedUser === u.username
+                    ? "bg-blue-50 border-blue-400"
+                    : "bg-gray-50 hover:bg-gray-100"
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-bold text-lg text-blue-700">{u.username}</p>
+                    <p className="text-sm text-gray-600">{u.role}</p>
+                  </div>
+                  <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                    u.isBlocked ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700"
+                  }`}>
+                    {u.isBlocked ? "Blocked" : "Active"}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl shadow border p-5">
-        <h3 className="text-xl font-bold mb-4">Reset User Training</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <input
-            className="border rounded-lg p-3"
-            placeholder="Username to reset training"
-            value={resetUsername}
-            onChange={(e) => setResetUsername(e.target.value)}
-          />
-          <button
-            onClick={handleResetTraining}
-            className="bg-yellow-500 text-white rounded-lg p-3 hover:bg-yellow-600"
-          >
-            Reset Training
-          </button>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-2xl shadow border p-5">
-        <h3 className="text-xl font-bold mb-4">User Details</h3>
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse">
-            <thead>
-              <tr className="bg-gray-100">
-                <th className="p-3 text-left border">Username</th>
-                <th className="p-3 text-left border">Role</th>
-                <th className="p-3 text-left border">Status</th>
-                <th className="p-3 text-left border">Created At</th>
-                <th className="p-3 text-left border">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((u, i) => (
-                <tr key={i}>
-                  <td className="p-3 border">{u.username}</td>
-                  <td className="p-3 border">{u.role}</td>
-                  <td className="p-3 border">
-                    {u.isBlocked ? (
-                      <span className="text-red-600 font-semibold">Blocked</span>
-                    ) : (
-                      <span className="text-green-600 font-semibold">Active</span>
-                    )}
-                  </td>
-                  <td className="p-3 border">
-                    {u.createdAt ? new Date(u.createdAt).toLocaleString() : "N/A"}
-                  </td>
-                  <td className="p-3 border">
-                    {u.isBlocked ? (
-                      <button
-                        onClick={() => handleUnblockUser(u.username)}
-                        className="bg-green-600 text-white px-3 py-2 rounded-lg hover:bg-green-700"
-                      >
-                        Unblock
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => handleBlockUser(u.username)}
-                        className="bg-red-600 text-white px-3 py-2 rounded-lg hover:bg-red-700"
-                      >
-                        Block
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-              {users.length === 0 && (
-                <tr>
-                  <td colSpan="5" className="p-4 text-center text-gray-500">
-                    No users found
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      {renderSelectedUserPanel()}
     </div>
   );
 
@@ -485,7 +550,7 @@ function AdminDashboard() {
         />
         <button
           onClick={handleAddSentence}
-          className="bg-purple-600 text-white rounded-lg p-3 hover:bg-purple-700"
+          className="bg-purple-600 text-white rounded-lg p-3"
         >
           Add Sentence
         </button>
@@ -506,7 +571,6 @@ function AdminDashboard() {
             <p><span className="font-semibold">Alerts:</span> {Array.isArray(a.alerts) ? a.alerts.join(", ") : ""}</p>
           </div>
         ))}
-        {analysis.length === 0 && <p className="text-gray-500">No analysis logs</p>}
       </div>
     </div>
   );
@@ -514,34 +578,14 @@ function AdminDashboard() {
   const renderLoginLogs = () => (
     <div className="bg-white rounded-2xl shadow border p-5">
       <h3 className="text-xl font-bold mb-4">Login Details</h3>
-      <div className="overflow-x-auto">
-        <table className="w-full border-collapse">
-          <thead>
-            <tr className="bg-gray-100">
-              <th className="p-3 text-left border">Username</th>
-              <th className="p-3 text-left border">Role</th>
-              <th className="p-3 text-left border">Login Time</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loginLogs.map((l, i) => (
-              <tr key={i}>
-                <td className="p-3 border">{l.username}</td>
-                <td className="p-3 border">{l.role}</td>
-                <td className="p-3 border">
-                  {l.loginAt ? new Date(l.loginAt).toLocaleString() : "N/A"}
-                </td>
-              </tr>
-            ))}
-            {loginLogs.length === 0 && (
-              <tr>
-                <td colSpan="3" className="p-4 text-center text-gray-500">
-                  No login logs
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+      <div className="space-y-3">
+        {loginLogs.map((l, i) => (
+          <div key={i} className="border rounded-xl p-4 bg-blue-50">
+            <p><span className="font-semibold">Username:</span> {l.username}</p>
+            <p><span className="font-semibold">Role:</span> {l.role}</p>
+            <p><span className="font-semibold">Login Time:</span> {l.loginAt ? new Date(l.loginAt).toLocaleString() : "N/A"}</p>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -558,7 +602,6 @@ function AdminDashboard() {
             <p><span className="font-semibold">Time:</span> {a.createdAt ? new Date(a.createdAt).toLocaleString() : "N/A"}</p>
           </div>
         ))}
-        {alerts.length === 0 && <p className="text-gray-500">No alerts</p>}
       </div>
     </div>
   );
@@ -631,13 +674,13 @@ function AdminDashboard() {
 
         <button
           onClick={loadAll}
-          className="mt-6 w-full bg-blue-600 text-white rounded-xl p-3 hover:bg-blue-700"
+          className="mt-6 w-full bg-blue-600 text-white rounded-xl p-3"
         >
           {loading ? "Refreshing..." : "Refresh All"}
         </button>
       </div>
 
-      <div className="flex-1 p-6">
+      <div className="flex-1 p-6 space-y-6">
         {activeTab === "dashboard" && renderDashboard()}
         {activeTab === "users" && renderUsers()}
         {activeTab === "sentences" && renderSentences()}

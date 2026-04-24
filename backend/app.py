@@ -1,11 +1,14 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from pymongo import MongoClient
 from datetime import datetime
+from io import BytesIO
 import numpy as np
 import bcrypt
 import torch
 import torch.nn as nn
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
 
 app = Flask(__name__)
 CORS(app)
@@ -50,6 +53,24 @@ def save_alert(user_id, alert_type, message):
     })
 
 
+def get_user_full_summary(username):
+    reports = list(db.exam.find({"userId": username}, {"_id": 0}).sort("createdAt", -1))
+    alerts = list(db.alerts.find({"userId": username}, {"_id": 0}).sort("createdAt", -1))
+    analysis = list(db.analysis.find({"userId": username}, {"_id": 0}).sort("createdAt", -1))
+    logins = list(db.login_logs.find({"username": username}, {"_id": 0}).sort("loginAt", -1))
+    user = db.users.find_one({"username": username}, {"_id": 0, "password": 0})
+    training = db.training.find_one({"userId": username}, {"_id": 0})
+
+    return {
+        "user": user,
+        "reports": reports,
+        "alerts": alerts,
+        "analysis": analysis,
+        "logins": logins,
+        "training": training
+    }
+
+
 # =========================================
 # MODULE 4 - SIAMESE NEURAL NETWORK
 # =========================================
@@ -85,30 +106,17 @@ def compare_vectors(v1, v2):
     dist = torch.norm(out1 - out2)
     similarity = 1 / (1 + dist.item())
 
-    return float(similarity), similarity > 0.75
+    return float(similarity)
 
 
-def classify_user(similarity):
-    if similarity >= 0.75:
+def classify_user(similarity, mismatch_count, rule_risk):
+    if similarity >= 0.68 and mismatch_count <= 1 and rule_risk < 25:
         return "GENUINE"
-    elif similarity >= 0.50:
-        return "SUSPICIOUS"
-    return "FRAUD"
 
+    if similarity < 0.45 and (mismatch_count >= 3 or rule_risk >= 35):
+        return "FRAUD"
 
-def ai_risk(similarity):
-    risk = 0
-    alerts = []
-
-    if similarity < 0.75:
-        risk += 40
-        alerts.append("AI_MISMATCH")
-
-    if similarity < 0.50:
-        risk += 20
-        alerts.append("LOW_SIMILARITY")
-
-    return risk, alerts
+    return "SUSPICIOUS"
 
 
 # =========================================
@@ -207,57 +215,106 @@ def extract_features(data):
     ], dtype=np.float32)
 
 
+def compute_training_statistics(samples):
+    if not samples:
+        return {
+            "featureVectors": [],
+            "baselineMean": [0.0] * 8,
+            "baselineStd": [0.0] * 8
+        }
+
+    feature_vectors = []
+
+    for sample in samples:
+        vec = extract_features([sample])
+        feature_vectors.append(vec)
+
+    matrix = np.vstack(feature_vectors)
+    baseline_mean = np.mean(matrix, axis=0)
+    baseline_std = np.std(matrix, axis=0)
+
+    return {
+        "featureVectors": [vec.tolist() for vec in feature_vectors],
+        "baselineMean": baseline_mean.tolist(),
+        "baselineStd": baseline_std.tolist()
+    }
+
+
 def rule_based_detection(copy_paste=0, tab_switch=0, warnings=0):
     risk = 0
     alerts = []
 
     if copy_paste > 0:
-        risk += 25
+        risk += 20
         alerts.append("COPY_PASTE")
 
     if tab_switch > 0:
-        risk += 25
+        risk += 20
         alerts.append("TAB_SWITCH")
 
     if warnings > 0:
-        risk += min(warnings * 10, 30)
+        risk += min(warnings * 8, 24)
         alerts.append("WARNING_COUNT")
 
     return risk, alerts
 
 
-def typing_pattern_warning(base_vec, curr_vec):
-    warnings = 0
-    reasons = []
+def tolerance_check(base_mean, base_std, curr_vec):
+    mismatch_count = 0
+    alerts = []
 
-    if abs(curr_vec[0] - base_vec[0]) > max(80, base_vec[0] * 0.35):
-        warnings += 1
-        reasons.append("HOLD_TIME_CHANGED")
+    tolerance = np.maximum(base_std * 2.0, np.array([
+        60.0,   # mean_hold
+        40.0,   # std_hold
+        80.0,   # mean_flight
+        60.0,   # std_flight
+        0.4,    # mean_mouse_speed
+        0.3,    # std_mouse_speed
+        8.0,    # mean_keys
+        3.0     # mean_clicks
+    ], dtype=np.float32))
 
-    if abs(curr_vec[2] - base_vec[2]) > max(100, base_vec[2] * 0.40):
-        warnings += 1
-        reasons.append("FLIGHT_TIME_CHANGED")
+    feature_names = [
+        "HOLD_TIME_CHANGED",
+        "HOLD_VARIANCE_CHANGED",
+        "FLIGHT_TIME_CHANGED",
+        "FLIGHT_VARIANCE_CHANGED",
+        "MOUSE_SPEED_CHANGED",
+        "MOUSE_VARIANCE_CHANGED",
+        "KEY_ACTIVITY_CHANGED",
+        "CLICK_ACTIVITY_CHANGED"
+    ]
 
-    if curr_vec[6] < base_vec[6] * 0.60:
-        warnings += 1
-        reasons.append("TYPING_ACTIVITY_LOW")
+    diffs = np.abs(curr_vec - base_mean)
 
-    return warnings, reasons
+    for i in range(len(diffs)):
+        if diffs[i] > tolerance[i]:
+            if i in [4, 5, 7]:
+                mismatch_count += 0.5
+            else:
+                mismatch_count += 1
+            alerts.append(feature_names[i])
+
+    return float(mismatch_count), alerts
 
 
-def mouse_anomaly(base_vec, curr_vec):
-    warnings = 0
-    reasons = []
+def ai_risk_from_similarity(similarity):
+    risk = 0
+    alerts = []
 
-    if abs(curr_vec[4] - base_vec[4]) > max(0.5, base_vec[4] * 0.6):
-        warnings += 1
-        reasons.append("MOUSE_SPEED_CHANGED")
+    if similarity < 0.68:
+        risk += 15
+        alerts.append("AI_SIMILARITY_LOW")
 
-    if curr_vec[7] < base_vec[7] * 0.5:
-        warnings += 1
-        reasons.append("MOUSE_ACTIVITY_LOW")
+    if similarity < 0.55:
+        risk += 10
+        alerts.append("AI_SIMILARITY_VERY_LOW")
 
-    return warnings, reasons
+    if similarity < 0.45:
+        risk += 10
+        alerts.append("AI_SIMILARITY_CRITICAL")
+
+    return risk, alerts
 
 
 # =========================================
@@ -477,11 +534,16 @@ def save_training():
     if not isinstance(samples, list) or len(samples) == 0:
         return jsonify({"error": "samples required"}), 400
 
+    stats = compute_training_statistics(samples)
+
     db.training.replace_one(
         {"userId": user_id},
         {
             "userId": user_id,
             "data": samples,
+            "featureVectors": stats["featureVectors"],
+            "baselineMean": stats["baselineMean"],
+            "baselineStd": stats["baselineStd"],
             "updatedAt": datetime.utcnow()
         },
         upsert=True
@@ -565,12 +627,24 @@ def analyze():
     if not baseline:
         return jsonify({"error": "No baseline"}), 404
 
-    base_vec = extract_features(baseline.get("data", []))
-    curr_vec = extract_features(samples)
+    current_vec = extract_features(samples)
 
-    similarity, same = compare_vectors(base_vec, curr_vec)
-    status = classify_user(similarity)
-    ai_score, ai_alerts = ai_risk(similarity)
+    baseline_mean = np.array(
+        baseline.get("baselineMean", [0.0] * 8),
+        dtype=np.float32
+    )
+    baseline_std = np.array(
+        baseline.get("baselineStd", [0.0] * 8),
+        dtype=np.float32
+    )
+
+    similarity = compare_vectors(baseline_mean, current_vec)
+
+    tolerance_mismatch_count, tolerance_alerts = tolerance_check(
+        baseline_mean, baseline_std, current_vec
+    )
+
+    ai_score, ai_alerts = ai_risk_from_similarity(similarity)
 
     rule_score, rule_alerts = rule_based_detection(
         copy_paste=copy_paste,
@@ -578,15 +652,18 @@ def analyze():
         warnings=warnings
     )
 
-    pattern_warning_count, pattern_reasons = typing_pattern_warning(base_vec, curr_vec)
-    mouse_warn, mouse_alerts = mouse_anomaly(base_vec, curr_vec)
+    total_mismatch_count = tolerance_mismatch_count
+    if similarity < 0.55:
+        total_mismatch_count += 1
 
-    risk = ai_score + rule_score + (pattern_warning_count * 15) + (mouse_warn * 15)
-    alerts = ai_alerts + rule_alerts + pattern_reasons + mouse_alerts
+    risk = ai_score + rule_score + int(tolerance_mismatch_count * 8)
+    alerts = ai_alerts + rule_alerts + tolerance_alerts
 
-    if risk >= 60:
+    status = classify_user(similarity, total_mismatch_count, rule_score)
+
+    if risk >= 60 and (total_mismatch_count >= 3 or rule_score >= 35):
         status = "FRAUD"
-    elif risk >= 30 and status != "FRAUD":
+    elif risk >= 25 and status != "FRAUD":
         status = "SUSPICIOUS"
 
     if status in ["SUSPICIOUS", "FRAUD"]:
@@ -601,14 +678,13 @@ def analyze():
         "riskScore": risk,
         "alerts": alerts,
         "similarity": float(similarity),
-        "sameUser": bool(same),
+        "sameUser": bool(similarity >= 0.68),
         "status": status,
         "samples": samples,
         "copyPaste": copy_paste,
         "tabSwitch": tab_switch,
         "warnings": warnings,
-        "patternWarnings": pattern_warning_count,
-        "mouseWarnings": mouse_warn,
+        "mismatchCount": float(total_mismatch_count),
         "createdAt": datetime.utcnow()
     }
 
@@ -618,10 +694,9 @@ def analyze():
         "riskScore": risk,
         "alerts": alerts,
         "similarity": float(similarity),
-        "sameUser": bool(same),
+        "sameUser": bool(similarity >= 0.68),
         "status": status,
-        "patternWarnings": pattern_warning_count,
-        "mouseWarnings": mouse_warn
+        "mismatchCount": float(total_mismatch_count)
     })
 
 
@@ -695,6 +770,95 @@ def get_users():
         db.users.find({}, {"_id": 0, "password": 0}).sort("createdAt", -1)
     )
     return jsonify(users)
+
+
+# =========================================
+# Admin User Details
+# =========================================
+@app.route("/api/admin/user-details/<username>", methods=["GET"])
+def get_user_details(username):
+    ok, resp, code = db_required()
+    if not ok:
+        return resp, code
+
+    summary = get_user_full_summary(username)
+
+    if not summary["user"]:
+        return jsonify({"error": "User not found"}), 404
+
+    return jsonify(summary)
+
+
+# =========================================
+# Admin User Report PDF
+# =========================================
+@app.route("/api/admin/user-report-pdf/<username>", methods=["GET"])
+def generate_user_report_pdf(username):
+    ok, resp, code = db_required()
+    if not ok:
+        return resp, code
+
+    summary = get_user_full_summary(username)
+
+    if not summary["user"]:
+        return jsonify({"error": "User not found"}), 404
+
+    buffer = BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+    y = height - 50
+
+    def write_line(text, step=18):
+        nonlocal y
+        if y < 60:
+            pdf.showPage()
+            y = height - 50
+        pdf.drawString(50, y, str(text))
+        y -= step
+
+    pdf.setFont("Helvetica-Bold", 16)
+    write_line(f"User Report - {username}", 25)
+
+    pdf.setFont("Helvetica", 11)
+    user = summary["user"]
+    write_line(f"Username: {user.get('username', 'N/A')}")
+    write_line(f"Role: {user.get('role', 'N/A')}")
+    write_line(f"Blocked: {user.get('isBlocked', False)}")
+    write_line(f"Created At: {user.get('createdAt', 'N/A')}", 25)
+
+    write_line("Exam Reports:", 20)
+    for r in summary["reports"][:10]:
+        write_line(
+            f"- Result: {r.get('result')} | Warnings: {r.get('warnings')} | Time: {r.get('createdAt')}"
+        )
+
+    write_line("Alerts:", 20)
+    for a in summary["alerts"][:10]:
+        write_line(
+            f"- Type: {a.get('type')} | Message: {a.get('message')} | Time: {a.get('createdAt')}"
+        )
+
+    write_line("Analysis Logs:", 20)
+    for a in summary["analysis"][:10]:
+        write_line(
+            f"- Status: {a.get('status')} | Similarity: {a.get('similarity')} | Risk: {a.get('riskScore')}"
+        )
+
+    write_line("Login Logs:", 20)
+    for l in summary["logins"][:10]:
+        write_line(
+            f"- Role: {l.get('role')} | Login Time: {l.get('loginAt')}"
+        )
+
+    pdf.save()
+    buffer.seek(0)
+
+    return send_file(
+        buffer,
+        as_attachment=True,
+        download_name=f"{username}_report.pdf",
+        mimetype="application/pdf"
+    )
 
 
 # =========================================
