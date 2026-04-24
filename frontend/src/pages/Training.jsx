@@ -45,6 +45,7 @@ function Training() {
   const [keys, setKeys] = useState([]);
   const [mouse, setMouse] = useState([]);
   const [clicks, setClicks] = useState([]);
+  const [scrolls, setScrolls] = useState([]);
   const [holdTimes, setHoldTimes] = useState([]);
   const [flightTimes, setFlightTimes] = useState([]);
   const [mouseSpeeds, setMouseSpeeds] = useState([]);
@@ -53,6 +54,7 @@ function Training() {
 
   const [notice, setNotice] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const [qualityScore, setQualityScore] = useState(0);
 
   const [dragBoxPos, setDragBoxPos] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
@@ -66,10 +68,55 @@ function Training() {
 
   const currentTask = useMemo(() => trainingTasks[index], [index]);
   const userId = localStorage.getItem("userId") || "user1";
+  const role = localStorage.getItem("role") || "user";
 
   const showNotice = (message) => {
     setNotice(message);
     setTimeout(() => setNotice(""), 2200);
+  };
+
+  const calculateQualityScore = (samples) => {
+    let score = 0;
+
+    const totalKeys = samples.reduce((sum, s) => sum + (s.keys?.length || 0), 0);
+    const totalMouse = samples.reduce((sum, s) => sum + (s.mouse?.length || 0), 0);
+    const totalClicks = samples.reduce((sum, s) => sum + (s.clicks?.length || 0), 0);
+    const totalHold = samples.reduce((sum, s) => sum + (s.holdTimes?.length || 0), 0);
+    const totalFlight = samples.reduce((sum, s) => sum + (s.flightTimes?.length || 0), 0);
+    const totalFiles = samples.reduce((sum, s) => sum + (s.fileEvents?.length || 0), 0);
+    const totalDrags = samples.reduce((sum, s) => sum + (s.dragEvents?.length || 0), 0);
+    const totalScrolls = samples.reduce((sum, s) => sum + (s.scrolls?.length || 0), 0);
+
+    if (samples.length >= 20) score += 20;
+    if (totalKeys >= 80) score += 20;
+    if (totalMouse >= 80) score += 15;
+    if (totalClicks >= 8) score += 10;
+    if (totalHold >= 30) score += 15;
+    if (totalFlight >= 30) score += 10;
+    if (totalFiles >= 3) score += 4;
+    if (totalDrags >= 2) score += 4;
+    if (totalScrolls >= 2) score += 2;
+
+    return Math.min(score, 100);
+  };
+
+  const saveBehaviorSession = async (events, page = "training") => {
+    try {
+      await fetch("http://localhost:5000/api/behavior/session-save", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          userId,
+          role,
+          page,
+          events
+        })
+      });
+    } catch (error) {
+      console.error("Training behavior session save failed:", error);
+    }
   };
 
   useEffect(() => {
@@ -114,6 +161,7 @@ function Training() {
     ]);
 
     const downTime = keyDownMapRef.current[e.key];
+
     if (downTime) {
       const hold = now - downTime;
       if (hold > 0) {
@@ -147,15 +195,25 @@ function Training() {
   const handleClick = (e) => {
     setClicks((prev) => [
       ...prev,
-      { type: "click", x: e.clientX, y: e.clientY, button: e.button, time: Date.now() }
+      {
+        type: "click",
+        x: e.clientX,
+        y: e.clientY,
+        button: e.button,
+        time: Date.now()
+      }
     ]);
   };
 
   const handleWheel = (e) => {
-    setMouse((prev) => [
-      ...prev,
-      { type: "scroll", deltaY: e.deltaY, time: Date.now() }
-    ]);
+    const data = {
+      type: "scroll",
+      deltaY: e.deltaY,
+      time: Date.now()
+    };
+
+    setScrolls((prev) => [...prev, data]);
+    setMouse((prev) => [...prev, data]);
   };
 
   const handleFileUpload = (e) => {
@@ -210,6 +268,7 @@ function Training() {
       setDragEvents((prev) => [
         ...prev,
         {
+          type: "drag",
           startTime: start,
           endTime: end,
           duration: end - start,
@@ -234,6 +293,7 @@ function Training() {
     setKeys([]);
     setMouse([]);
     setClicks([]);
+    setScrolls([]);
     setHoldTimes([]);
     setFlightTimes([]);
     setMouseSpeeds([]);
@@ -260,6 +320,7 @@ function Training() {
       keys,
       mouse,
       clicks,
+      scrolls,
       holdTimes,
       flightTimes,
       mouseSpeeds,
@@ -326,11 +387,23 @@ function Training() {
 
     const currentRecord = buildCurrentTaskRecord();
     const updatedData = [...taskData, currentRecord];
+    const currentQuality = calculateQualityScore(updatedData);
+
     setTaskData(updatedData);
+    setQualityScore(currentQuality);
+
+    await saveBehaviorSession(currentRecord, "training_task");
 
     if (index < trainingTasks.length - 1) {
       setIndex((prev) => prev + 1);
       resetCurrentCapture();
+      return;
+    }
+
+    if (currentQuality < 60) {
+      setErrorMessage(
+        `Training quality low (${currentQuality}%). Please redo training and type/move naturally.`
+      );
       return;
     }
 
@@ -344,7 +417,8 @@ function Training() {
         },
         body: JSON.stringify({
           userId,
-          samples: updatedData
+          samples: updatedData,
+          qualityScore: currentQuality
         })
       });
 
@@ -356,7 +430,7 @@ function Training() {
       }
 
       localStorage.setItem("hasBaseline", "true");
-      showNotice("Training completed successfully");
+      showNotice(`Training completed successfully. Quality: ${currentQuality}%`);
 
       setTimeout(() => {
         navigate("/user");
@@ -370,6 +444,7 @@ function Training() {
   };
 
   const taskProgress = `${index + 1} / ${trainingTasks.length}`;
+  const progressPercent = Math.round(((index + 1) / trainingTasks.length) * 100);
 
   if (!started) {
     return (
@@ -402,6 +477,7 @@ function Training() {
               <li>• 10 sentence typing tasks</li>
               <li>• 3 file upload tasks</li>
               <li>• 2 drag interaction tasks</li>
+              <li>• Quality score validation</li>
             </ul>
           </div>
 
@@ -440,6 +516,30 @@ function Training() {
 
           <div className="bg-green-100 text-green-700 px-4 py-2 rounded-full font-semibold">
             Task {taskProgress}
+          </div>
+        </div>
+
+        <div className="mb-6">
+          <div className="flex justify-between text-sm text-gray-600 mb-2">
+            <span>Progress</span>
+            <span>{progressPercent}%</span>
+          </div>
+          <div className="w-full bg-gray-200 rounded-full h-3">
+            <div
+              className="bg-green-600 h-3 rounded-full"
+              style={{ width: `${progressPercent}%` }}
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
+          <div className="bg-blue-50 border rounded-xl p-4">
+            <p className="text-sm text-gray-600">Current Quality Score</p>
+            <h2 className="text-2xl font-bold text-blue-700">{qualityScore}%</h2>
+          </div>
+          <div className="bg-purple-50 border rounded-xl p-4">
+            <p className="text-sm text-gray-600">Minimum Required</p>
+            <h2 className="text-2xl font-bold text-purple-700">60%</h2>
           </div>
         </div>
 
@@ -517,7 +617,7 @@ function Training() {
                 }`}
                 style={{
                   left: `${dragBoxPos.x}px`,
-                  top: `${dragBoxPos.y}px`,
+                  top: `${dragBoxPos.y}px`
                 }}
               >
                 {dragDone ? "Done" : "Drag"}
@@ -530,39 +630,16 @@ function Training() {
           </div>
         )}
 
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-6">
-          <div className="bg-blue-50 p-3 rounded-xl text-center">
-            <p className="text-xs text-gray-500">Keys</p>
-            <p className="font-bold">{keys.length}</p>
-          </div>
-          <div className="bg-purple-50 p-3 rounded-xl text-center">
-            <p className="text-xs text-gray-500">Mouse</p>
-            <p className="font-bold">{mouse.length}</p>
-          </div>
-          <div className="bg-orange-50 p-3 rounded-xl text-center">
-            <p className="text-xs text-gray-500">Clicks</p>
-            <p className="font-bold">{clicks.length}</p>
-          </div>
-          <div className="bg-green-50 p-3 rounded-xl text-center">
-            <p className="text-xs text-gray-500">Hold</p>
-            <p className="font-bold">{holdTimes.length}</p>
-          </div>
-          <div className="bg-pink-50 p-3 rounded-xl text-center">
-            <p className="text-xs text-gray-500">Flight</p>
-            <p className="font-bold">{flightTimes.length}</p>
-          </div>
-          <div className="bg-yellow-50 p-3 rounded-xl text-center">
-            <p className="text-xs text-gray-500">Mouse Speed</p>
-            <p className="font-bold">{mouseSpeeds.length}</p>
-          </div>
-          <div className="bg-cyan-50 p-3 rounded-xl text-center">
-            <p className="text-xs text-gray-500">Files</p>
-            <p className="font-bold">{fileEvents.length}</p>
-          </div>
-          <div className="bg-red-50 p-3 rounded-xl text-center">
-            <p className="text-xs text-gray-500">Drags</p>
-            <p className="font-bold">{dragEvents.length}</p>
-          </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-9 gap-3 mb-6">
+          <Metric title="Keys" value={keys.length} />
+          <Metric title="Mouse" value={mouse.length} />
+          <Metric title="Clicks" value={clicks.length} />
+          <Metric title="Scrolls" value={scrolls.length} />
+          <Metric title="Hold" value={holdTimes.length} />
+          <Metric title="Flight" value={flightTimes.length} />
+          <Metric title="Mouse Speed" value={mouseSpeeds.length} />
+          <Metric title="Files" value={fileEvents.length} />
+          <Metric title="Drags" value={dragEvents.length} />
         </div>
 
         <div className="flex flex-col sm:flex-row gap-3 justify-end">
@@ -587,6 +664,15 @@ function Training() {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function Metric({ title, value }) {
+  return (
+    <div className="bg-gray-50 p-3 rounded-xl text-center border">
+      <p className="text-xs text-gray-500">{title}</p>
+      <p className="font-bold">{value}</p>
     </div>
   );
 }

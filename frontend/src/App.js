@@ -6,7 +6,6 @@ import AdminDashboard from "./pages/AdminDashboard";
 import UserDashboard from "./pages/UserDashboard";
 import Training from "./pages/Training";
 import Exam from "./pages/Exam";
-import BehaviorTracker from "./components/BehaviorTracker";
 
 const ProtectedRoute = ({ children, roleRequired }) => {
   const user = localStorage.getItem("userId");
@@ -26,8 +25,6 @@ const ProtectedRoute = ({ children, roleRequired }) => {
 function App() {
   return (
     <BrowserRouter>
-      <BehaviorTracker />
-
       <Routes>
         <Route path="/" element={<Login />} />
 
