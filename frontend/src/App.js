@@ -1,16 +1,13 @@
 import React from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
-// Main Pages
 import Login from "./pages/Login";
 import AdminDashboard from "./pages/AdminDashboard";
 import UserDashboard from "./pages/UserDashboard";
 import Training from "./pages/Training";
 import Exam from "./pages/Exam";
+import BehaviorTracker from "./components/BehaviorTracker";
 
-/**
- * Simple Protected Route
- */
 const ProtectedRoute = ({ children, roleRequired }) => {
   const user = localStorage.getItem("userId");
   const role = localStorage.getItem("role");
@@ -29,12 +26,11 @@ const ProtectedRoute = ({ children, roleRequired }) => {
 function App() {
   return (
     <BrowserRouter>
-      <Routes>
+      <BehaviorTracker />
 
-        {/* 🔐 Login */}
+      <Routes>
         <Route path="/" element={<Login />} />
 
-        {/* 👨‍💼 Admin Dashboard */}
         <Route
           path="/admin"
           element={
@@ -44,7 +40,6 @@ function App() {
           }
         />
 
-        {/* 👤 User Dashboard */}
         <Route
           path="/user"
           element={
@@ -54,7 +49,6 @@ function App() {
           }
         />
 
-        {/* 🧠 Training */}
         <Route
           path="/training"
           element={
@@ -64,7 +58,6 @@ function App() {
           }
         />
 
-        {/* 📝 Exam */}
         <Route
           path="/exam"
           element={
@@ -74,9 +67,7 @@ function App() {
           }
         />
 
-        {/* ❌ Unknown route redirect */}
         <Route path="*" element={<Navigate to="/" />} />
-
       </Routes>
     </BrowserRouter>
   );

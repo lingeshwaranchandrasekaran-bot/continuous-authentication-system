@@ -911,7 +911,40 @@ def get_stats():
         "suspiciousCount": suspicious_count,
         "genuineCount": genuine_count
     })
+@app.route("/api/behavior/session-save", methods=["POST"])
+def save_behavior_session():
+    ok, resp, code = db_required()
+    if not ok:
+        return resp, code
 
+    data = request.json or {}
+
+    user_id = data.get("userId")
+    role = data.get("role", "user")
+    page = data.get("page", "unknown")
+    events = data.get("events", {})
+
+    if not user_id:
+        return jsonify({"error": "userId required"}), 400
+
+    db.behavior_sessions.insert_one({
+        "userId": user_id,
+        "role": role,
+        "page": page,
+        "events": events,
+        "summary": {
+            "keys": len(events.get("keys", [])),
+            "mouse": len(events.get("mouse", [])),
+            "clicks": len(events.get("clicks", [])),
+            "scrolls": len(events.get("scrolls", [])),
+            "drags": len(events.get("drags", [])),
+            "files": len(events.get("files", [])),
+            "focusEvents": len(events.get("focusEvents", []))
+        },
+        "createdAt": datetime.utcnow()
+    })
+
+    return jsonify({"message": "Behavior session saved"})
 
 # =========================================
 # Run App
