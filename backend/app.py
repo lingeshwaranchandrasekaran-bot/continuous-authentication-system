@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from pymongo import MongoClient
-from datetime import datetime
+from datetime import datetime, timezone
 from io import BytesIO
 import os
 import numpy as np
@@ -20,10 +20,7 @@ DB_NAME = "monitor_system"
 client = None
 db = None
 
-current_desktop_user = {
-    "userId": "unknown",
-    "role": "user"
-}
+current_desktop_user = {"userId": "unknown", "role": "user"}
 
 try:
     client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=3000)
@@ -35,6 +32,10 @@ except Exception as e:
     db = None
 
 
+def now_utc():
+    return datetime.now(timezone.utc)
+
+
 def db_required():
     if db is None:
         return False, jsonify({"error": "MongoDB not connected"}), 500
@@ -43,6 +44,8 @@ def db_required():
 
 def clean_value(value):
     if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
         return value.isoformat()
     if isinstance(value, list):
         return [clean_value(v) for v in value]
@@ -71,7 +74,7 @@ def save_alert(user_id, alert_type, message, risk_score=0):
         "message": message,
         "riskScore": risk_score,
         "status": "unread",
-        "createdAt": datetime.utcnow()
+        "createdAt": now_utc()
     })
 
 
@@ -369,7 +372,7 @@ def register():
         "password": hashed,
         "role": role,
         "isBlocked": False,
-        "createdAt": datetime.utcnow()
+        "createdAt": now_utc()
     })
 
     return jsonify({"message": "User created successfully"})
@@ -402,13 +405,12 @@ def login():
 
     if bcrypt.checkpw(password.encode("utf-8"), stored_password):
         has_baseline = db.training.find_one({"userId": username}) is not None
-
         role = user.get("role", "user")
 
         db.login_logs.insert_one({
             "username": username,
             "role": role,
-            "loginAt": datetime.utcnow()
+            "loginAt": now_utc()
         })
 
         return jsonify({
@@ -453,7 +455,7 @@ def block_user(username):
 
     result = db.users.update_one(
         {"username": username},
-        {"$set": {"isBlocked": True, "blockedAt": datetime.utcnow()}}
+        {"$set": {"isBlocked": True, "blockedAt": now_utc()}}
     )
 
     if result.matched_count == 0:
@@ -520,7 +522,7 @@ def save_training():
             "baselineStd": stats["baselineStd"],
             "qualityScore": quality_score,
             "status": "COMPLETED",
-            "updatedAt": datetime.utcnow()
+            "updatedAt": now_utc()
         },
         upsert=True
     )
@@ -561,7 +563,7 @@ def add_sentence():
 
     db.sentences.insert_one({
         "sentence": sentence,
-        "createdAt": datetime.utcnow()
+        "createdAt": now_utc()
     })
 
     return jsonify({"message": "Sentence added successfully"})
@@ -641,7 +643,7 @@ def analyze():
         "focusLost": focus_lost,
         "dragCount": drag_count,
         "mismatchCount": float(total_mismatch_count),
-        "createdAt": datetime.utcnow()
+        "createdAt": now_utc()
     }
 
     db.analysis.insert_one(doc)
@@ -693,7 +695,7 @@ def save_behavior_session():
         "events": events,
         "summary": summary,
         "featureVector": feature_vec,
-        "createdAt": datetime.utcnow()
+        "createdAt": now_utc()
     })
 
     return jsonify({
@@ -726,7 +728,7 @@ def save_exam():
         "warnings": warnings,
         "result": result,
         "warningDetails": warning_details,
-        "createdAt": datetime.utcnow()
+        "createdAt": now_utc()
     })
 
     if warnings > 0 or result in ["SUSPICIOUS", "FRAUD", "FRAUD_AUTO_LOGOUT", "PATTERN_AUTO_LOGOUT"]:
@@ -902,7 +904,25 @@ def generate_user_report_pdf(username):
         download_name=f"{username}_full_report.pdf",
         mimetype="application/pdf"
     )
+@app.route("/api/desktop/alert", methods=["POST"])
+def desktop_alert():
+    ok, resp, code = db_required()
+    if not ok:
+        return resp, code
 
+    data = request.json or {}
+
+    user_id = data.get("userId")
+    alert_type = data.get("type", "DESKTOP_ALERT")
+    message = data.get("message", "Desktop alert")
+    risk_score = int(data.get("riskScore", 0))
+
+    if not user_id:
+        return jsonify({"error": "userId required"}), 400
+
+    save_alert(user_id, alert_type, message, risk_score)
+
+    return jsonify({"message": "Desktop alert saved"})
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)

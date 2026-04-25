@@ -1,5 +1,15 @@
 import React from "react";
 
+function formatIST(time) {
+  if (!time) return "N/A";
+
+  return new Date(time).toLocaleString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    dateStyle: "medium",
+    timeStyle: "medium",
+  });
+}
+
 function BehaviorTracker({ sessions = [], analysis = [] }) {
   const latestSession = sessions[0];
   const latestSummary = latestSession?.summary || {};
@@ -33,8 +43,7 @@ function BehaviorTracker({ sessions = [], analysis = [] }) {
                   <strong>Role:</strong> {s.role || "user"}
                 </p>
                 <p>
-                  <strong>Time:</strong>{" "}
-                  {s.createdAt ? new Date(s.createdAt).toLocaleString() : "N/A"}
+                  <strong>Time:</strong> {formatIST(s.createdAt)}
                 </p>
 
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-3 text-sm">
@@ -85,6 +94,9 @@ function BehaviorTracker({ sessions = [], analysis = [] }) {
                 </p>
                 <p>
                   <strong>Mismatch Count:</strong> {a.mismatchCount}
+                </p>
+                <p>
+                  <strong>Time:</strong> {formatIST(a.createdAt)}
                 </p>
                 <p>
                   <strong>Alerts:</strong>{" "}

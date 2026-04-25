@@ -14,6 +14,16 @@ import {
 } from "recharts";
 import BehaviorTracker from "../components/BehaviorTracker";
 
+const formatIST = (time) => {
+  if (!time) return "N/A";
+
+  return new Date(time).toLocaleString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    dateStyle: "medium",
+    timeStyle: "medium",
+  });
+};
+
 function AdminDashboard() {
   const [activeTab, setActiveTab] = useState("dashboard");
 
@@ -119,7 +129,11 @@ function AdminDashboard() {
     const res = await fetch(`${API}/api/admin/create-user`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: newUsername, password: newPassword, role: newRole }),
+      body: JSON.stringify({
+        username: newUsername,
+        password: newPassword,
+        role: newRole,
+      }),
     });
 
     const data = await res.json();
@@ -180,7 +194,10 @@ function AdminDashboard() {
     alert("Training reset successful");
     setResetUsername("");
     loadAll();
-    if (selectedUser === resetUsername) loadUserDetails(resetUsername);
+
+    if (selectedUser === resetUsername) {
+      loadUserDetails(resetUsername);
+    }
   };
 
   const handleAddSentence = async () => {
@@ -220,7 +237,10 @@ function AdminDashboard() {
 
     alert("User blocked successfully");
     loadAll();
-    if (selectedUser === username) loadUserDetails(username);
+
+    if (selectedUser === username) {
+      loadUserDetails(username);
+    }
   };
 
   const handleUnblockUser = async (username) => {
@@ -237,7 +257,10 @@ function AdminDashboard() {
 
     alert("User unblocked successfully");
     loadAll();
-    if (selectedUser === username) loadUserDetails(username);
+
+    if (selectedUser === username) {
+      loadUserDetails(username);
+    }
   };
 
   const handleDownloadPdf = (username) => {
@@ -317,12 +340,17 @@ function AdminDashboard() {
           <div>
             <h3 className="text-2xl font-bold text-blue-700">{user.username}</h3>
             <p className="text-gray-600">Role: {user.role}</p>
-            <p className="text-gray-600">Status: {user.isBlocked ? "Blocked" : "Active"}</p>
-            <p className="text-gray-600">Training Quality: {training.qualityScore || 0}%</p>
-            <p className="text-gray-600">Training Status: {training.status || "Not Completed"}</p>
             <p className="text-gray-600">
-              Baseline Updated:{" "}
-              {training.updatedAt ? new Date(training.updatedAt).toLocaleString() : "Not Available"}
+              Status: {user.isBlocked ? "Blocked" : "Active"}
+            </p>
+            <p className="text-gray-600">
+              Training Quality: {training.qualityScore || 0}%
+            </p>
+            <p className="text-gray-600">
+              Training Status: {training.status || "Not Completed"}
+            </p>
+            <p className="text-gray-600">
+              Baseline Updated: {formatIST(training.updatedAt)}
             </p>
           </div>
 
@@ -370,16 +398,47 @@ function AdminDashboard() {
 
         {selectedUserTab === "reports" && (
           <div className="space-y-3">
-            {userReports.length === 0 && <p className="text-gray-500">No reports found</p>}
+            {userReports.length === 0 && (
+              <p className="text-gray-500">No reports found</p>
+            )}
 
             {userReports.map((r, i) => (
               <div key={i} className="border rounded-xl p-4 bg-gray-50">
-                <p><span className="font-semibold">Result:</span> {r.result}</p>
-                <p><span className="font-semibold">Warnings:</span> {r.warnings}</p>
+                <p>
+                  <span className="font-semibold">Result:</span> {r.result}
+                </p>
+                <p>
+                  <span className="font-semibold">Warnings:</span> {r.warnings}
+                </p>
                 <p>
                   <span className="font-semibold">Time:</span>{" "}
-                  {r.createdAt ? new Date(r.createdAt).toLocaleString() : "N/A"}
+                  {formatIST(r.createdAt)}
                 </p>
+
+                {Array.isArray(r.warningDetails) &&
+                  r.warningDetails.length > 0 && (
+                    <div className="mt-3 space-y-2">
+                      {r.warningDetails.map((w, idx) => (
+                        <div key={idx} className="bg-red-50 border rounded-lg p-3">
+                          <p>
+                            <span className="font-medium">Type:</span> {w.kind}
+                          </p>
+                          <p>
+                            <span className="font-medium">Reason:</span>{" "}
+                            {w.reason}
+                          </p>
+                          <p>
+                            <span className="font-medium">Question No:</span>{" "}
+                            {w.questionNo}
+                          </p>
+                          <p>
+                            <span className="font-medium">Time:</span>{" "}
+                            {formatIST(w.time)}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
               </div>
             ))}
           </div>
@@ -387,16 +446,36 @@ function AdminDashboard() {
 
         {selectedUserTab === "alerts" && (
           <div className="space-y-3">
-            {userAlerts.length === 0 && <p className="text-gray-500">No alerts found</p>}
+            {userAlerts.length === 0 && (
+              <p className="text-gray-500">No alerts found</p>
+            )}
 
             {userAlerts.map((a, i) => (
-              <div key={i} className="border rounded-xl p-4 bg-red-50">
-                <p><span className="font-semibold">Type:</span> {a.type}</p>
-                <p><span className="font-semibold">Risk Score:</span> {a.riskScore || 0}</p>
-                <p><span className="font-semibold">Message:</span> {a.message}</p>
+              <div
+                key={i}
+                className={`border rounded-xl p-4 ${
+                  a.type === "DESKTOP_AUTO_LOCK"
+                    ? "bg-red-100"
+                    : a.type === "DESKTOP_WARNING"
+                    ? "bg-orange-100"
+                    : a.type === "TRAINING_COMPLETED"
+                    ? "bg-green-100"
+                    : "bg-red-50"
+                }`}
+              >
+                <p>
+                  <span className="font-semibold">Type:</span> {a.type}
+                </p>
+                <p>
+                  <span className="font-semibold">Risk Score:</span>{" "}
+                  {a.riskScore || 0}
+                </p>
+                <p>
+                  <span className="font-semibold">Message:</span> {a.message}
+                </p>
                 <p>
                   <span className="font-semibold">Time:</span>{" "}
-                  {a.createdAt ? new Date(a.createdAt).toLocaleString() : "N/A"}
+                  {formatIST(a.createdAt)}
                 </p>
               </div>
             ))}
@@ -405,17 +484,42 @@ function AdminDashboard() {
 
         {selectedUserTab === "analysis" && (
           <div className="space-y-3">
-            {userAnalysis.length === 0 && <p className="text-gray-500">No analysis logs found</p>}
+            {userAnalysis.length === 0 && (
+              <p className="text-gray-500">No analysis logs found</p>
+            )}
 
             {userAnalysis.map((a, i) => (
-              <div key={i} className="border rounded-xl p-4 bg-yellow-50">
-                <p><span className="font-semibold">Status:</span> {a.status}</p>
+              <div
+                key={i}
+                className={`border rounded-xl p-4 ${
+                  a.status === "FRAUD"
+                    ? "bg-red-50"
+                    : a.status === "SUSPICIOUS"
+                    ? "bg-yellow-50"
+                    : "bg-green-50"
+                }`}
+              >
+                <p>
+                  <span className="font-semibold">Status:</span> {a.status}
+                </p>
                 <p>
                   <span className="font-semibold">Similarity:</span>{" "}
-                  {typeof a.similarity === "number" ? a.similarity.toFixed(3) : a.similarity}
+                  {typeof a.similarity === "number"
+                    ? a.similarity.toFixed(3)
+                    : a.similarity}
                 </p>
-                <p><span className="font-semibold">Risk Score:</span> {a.riskScore}</p>
-                <p><span className="font-semibold">Mismatch Count:</span> {a.mismatchCount}</p>
+                <p>
+                  <span className="font-semibold">Risk Score:</span>{" "}
+                  {a.riskScore}
+                </p>
+                <p>
+                  <span className="font-semibold">Mismatch Count:</span>{" "}
+                  {a.mismatchCount}
+                </p>
+                <p>
+                  <span className="font-semibold">Time:</span>{" "}
+                  {formatIST(a.createdAt)}
+                </p>
                 <p>
                   <span className="font-semibold">Alerts:</span>{" "}
                   {Array.isArray(a.alerts) ? a.alerts.join(", ") : ""}
@@ -432,21 +536,35 @@ function AdminDashboard() {
         {selectedUserTab === "training" && (
           <div className="space-y-4">
             <div className="border rounded-xl p-4 bg-green-50">
-              <p><span className="font-semibold">Training Status:</span> {training.status || "Not Completed"}</p>
-              <p><span className="font-semibold">Quality Score:</span> {training.qualityScore || 0}%</p>
+              <p>
+                <span className="font-semibold">Training Status:</span>{" "}
+                {training.status || "Not Completed"}
+              </p>
+              <p>
+                <span className="font-semibold">Quality Score:</span>{" "}
+                {training.qualityScore || 0}%
+              </p>
               <p>
                 <span className="font-semibold">Updated At:</span>{" "}
-                {training.updatedAt ? new Date(training.updatedAt).toLocaleString() : "N/A"}
+                {formatIST(training.updatedAt)}
               </p>
-              <p><span className="font-semibold">Feature Vectors:</span> {training.featureVectors?.length || 0}</p>
-              <p><span className="font-semibold">Samples:</span> {training.data?.length || 0}</p>
+              <p>
+                <span className="font-semibold">Feature Vectors:</span>{" "}
+                {training.featureVectors?.length || 0}
+              </p>
+              <p>
+                <span className="font-semibold">Samples:</span>{" "}
+                {training.data?.length || 0}
+              </p>
             </div>
 
             <div className="border rounded-xl p-4 bg-gray-50">
               <h4 className="font-bold mb-2">Baseline Mean</h4>
               <p className="text-sm break-words">
                 {Array.isArray(training.baselineMean)
-                  ? training.baselineMean.map((v) => Number(v).toFixed(3)).join(", ")
+                  ? training.baselineMean
+                      .map((v) => Number(v).toFixed(3))
+                      .join(", ")
                   : "No baseline mean available"}
               </p>
             </div>
@@ -455,7 +573,9 @@ function AdminDashboard() {
               <h4 className="font-bold mb-2">Baseline Std</h4>
               <p className="text-sm break-words">
                 {Array.isArray(training.baselineStd)
-                  ? training.baselineStd.map((v) => Number(v).toFixed(3)).join(", ")
+                  ? training.baselineStd
+                      .map((v) => Number(v).toFixed(3))
+                      .join(", ")
                   : "No baseline std available"}
               </p>
             </div>
@@ -464,14 +584,18 @@ function AdminDashboard() {
 
         {selectedUserTab === "logins" && (
           <div className="space-y-3">
-            {logins.length === 0 && <p className="text-gray-500">No login logs found</p>}
+            {logins.length === 0 && (
+              <p className="text-gray-500">No login logs found</p>
+            )}
 
             {logins.map((l, i) => (
               <div key={i} className="border rounded-xl p-4 bg-blue-50">
-                <p><span className="font-semibold">Role:</span> {l.role}</p>
+                <p>
+                  <span className="font-semibold">Role:</span> {l.role}
+                </p>
                 <p>
                   <span className="font-semibold">Login Time:</span>{" "}
-                  {l.loginAt ? new Date(l.loginAt).toLocaleString() : "N/A"}
+                  {formatIST(l.loginAt)}
                 </p>
               </div>
             ))}
@@ -486,7 +610,7 @@ function AdminDashboard() {
       <div className="bg-gradient-to-r from-blue-700 to-indigo-700 text-white rounded-2xl p-6 shadow">
         <h2 className="text-3xl font-bold">Admin Overview</h2>
         <p className="mt-2 text-blue-100">
-          Monitor users, reports, alerts, AI analysis, and behavior tracking in one place.
+          Monitor users, reports, alerts, AI analysis, desktop warnings, and behavior tracking.
         </p>
       </div>
 
@@ -497,10 +621,11 @@ function AdminDashboard() {
         <StatCard title="Behavior Sessions" value={stats.behaviorSessions || 0} color="purple" />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <StatCard title="Genuine" value={stats.genuineCount || 0} color="green" />
         <StatCard title="Suspicious" value={stats.suspiciousCount || 0} color="yellow" />
         <StatCard title="Fraud" value={stats.fraudCount || 0} color="red" />
+        <StatCard title="Blocked Users" value={stats.blockedUsers || 0} color="red" />
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
@@ -543,15 +668,32 @@ function AdminDashboard() {
           <h3 className="text-xl font-bold mb-4">Create User</h3>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <input className="border rounded-lg p-3" placeholder="Username" value={newUsername} onChange={(e) => setNewUsername(e.target.value)} />
-            <input className="border rounded-lg p-3" placeholder="Password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
-            <select className="border rounded-lg p-3" value={newRole} onChange={(e) => setNewRole(e.target.value)}>
+            <input
+              className="border rounded-lg p-3"
+              placeholder="Username"
+              value={newUsername}
+              onChange={(e) => setNewUsername(e.target.value)}
+            />
+            <input
+              className="border rounded-lg p-3"
+              placeholder="Password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+            />
+            <select
+              className="border rounded-lg p-3"
+              value={newRole}
+              onChange={(e) => setNewRole(e.target.value)}
+            >
               <option value="user">User</option>
               <option value="admin">Admin</option>
             </select>
           </div>
 
-          <button onClick={handleCreateUser} className="mt-4 bg-green-600 text-white rounded-lg px-4 py-3">
+          <button
+            onClick={handleCreateUser}
+            className="mt-4 bg-green-600 text-white rounded-lg px-4 py-3"
+          >
             Create User
           </button>
         </div>
@@ -560,8 +702,16 @@ function AdminDashboard() {
           <h3 className="text-xl font-bold mb-4">Delete User</h3>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <input className="border rounded-lg p-3" placeholder="Username to delete" value={deleteUsername} onChange={(e) => setDeleteUsername(e.target.value)} />
-            <button onClick={handleDeleteUser} className="bg-red-600 text-white rounded-lg p-3">
+            <input
+              className="border rounded-lg p-3"
+              placeholder="Username to delete"
+              value={deleteUsername}
+              onChange={(e) => setDeleteUsername(e.target.value)}
+            />
+            <button
+              onClick={handleDeleteUser}
+              className="bg-red-600 text-white rounded-lg p-3"
+            >
               Delete User
             </button>
           </div>
@@ -571,8 +721,16 @@ function AdminDashboard() {
           <h3 className="text-xl font-bold mb-4">Reset Training</h3>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <input className="border rounded-lg p-3" placeholder="Username to reset training" value={resetUsername} onChange={(e) => setResetUsername(e.target.value)} />
-            <button onClick={handleResetTraining} className="bg-yellow-500 text-white rounded-lg p-3">
+            <input
+              className="border rounded-lg p-3"
+              placeholder="Username to reset training"
+              value={resetUsername}
+              onChange={(e) => setResetUsername(e.target.value)}
+            />
+            <button
+              onClick={handleResetTraining}
+              className="bg-yellow-500 text-white rounded-lg p-3"
+            >
               Reset Training
             </button>
           </div>
@@ -607,9 +765,13 @@ function AdminDashboard() {
                     <p className="text-sm text-gray-600">{u.role}</p>
                   </div>
 
-                  <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                    u.isBlocked ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700"
-                  }`}>
+                  <span
+                    className={`px-3 py-1 rounded-full text-sm font-medium ${
+                      u.isBlocked
+                        ? "bg-red-100 text-red-700"
+                        : "bg-green-100 text-green-700"
+                    }`}
+                  >
                     {u.isBlocked ? "Blocked" : "Active"}
                   </span>
                 </div>
@@ -639,7 +801,10 @@ function AdminDashboard() {
           onChange={(e) => setNewSentence(e.target.value)}
         />
 
-        <button onClick={handleAddSentence} className="bg-purple-600 text-white rounded-lg p-3">
+        <button
+          onClick={handleAddSentence}
+          className="bg-purple-600 text-white rounded-lg p-3"
+        >
           Add Sentence
         </button>
       </div>
@@ -653,15 +818,35 @@ function AdminDashboard() {
       <div className="space-y-3">
         {analysis.map((a, i) => (
           <div key={i} className="border rounded-xl p-4 bg-gray-50">
-            <p><span className="font-semibold">User:</span> {a.userId}</p>
-            <p><span className="font-semibold">Status:</span> {a.status}</p>
-            <p><span className="font-semibold">Similarity:</span> {typeof a.similarity === "number" ? a.similarity.toFixed(3) : a.similarity}</p>
-            <p><span className="font-semibold">Risk Score:</span> {a.riskScore}</p>
-            <p><span className="font-semibold">Alerts:</span> {Array.isArray(a.alerts) ? a.alerts.join(", ") : ""}</p>
+            <p>
+              <span className="font-semibold">User:</span> {a.userId}
+            </p>
+            <p>
+              <span className="font-semibold">Status:</span> {a.status}
+            </p>
+            <p>
+              <span className="font-semibold">Similarity:</span>{" "}
+              {typeof a.similarity === "number"
+                ? a.similarity.toFixed(3)
+                : a.similarity}
+            </p>
+            <p>
+              <span className="font-semibold">Risk Score:</span> {a.riskScore}
+            </p>
+            <p>
+              <span className="font-semibold">Time:</span>{" "}
+              {formatIST(a.createdAt)}
+            </p>
+            <p>
+              <span className="font-semibold">Alerts:</span>{" "}
+              {Array.isArray(a.alerts) ? a.alerts.join(", ") : ""}
+            </p>
           </div>
         ))}
 
-        {analysis.length === 0 && <p className="text-gray-500">No activity logs found</p>}
+        {analysis.length === 0 && (
+          <p className="text-gray-500">No activity logs found</p>
+        )}
       </div>
     </div>
   );
@@ -673,13 +858,22 @@ function AdminDashboard() {
       <div className="space-y-3">
         {loginLogs.map((l, i) => (
           <div key={i} className="border rounded-xl p-4 bg-blue-50">
-            <p><span className="font-semibold">Username:</span> {l.username}</p>
-            <p><span className="font-semibold">Role:</span> {l.role}</p>
-            <p><span className="font-semibold">Login Time:</span> {l.loginAt ? new Date(l.loginAt).toLocaleString() : "N/A"}</p>
+            <p>
+              <span className="font-semibold">Username:</span> {l.username}
+            </p>
+            <p>
+              <span className="font-semibold">Role:</span> {l.role}
+            </p>
+            <p>
+              <span className="font-semibold">Login Time:</span>{" "}
+              {formatIST(l.loginAt)}
+            </p>
           </div>
         ))}
 
-        {loginLogs.length === 0 && <p className="text-gray-500">No login logs found</p>}
+        {loginLogs.length === 0 && (
+          <p className="text-gray-500">No login logs found</p>
+        )}
       </div>
     </div>
   );
@@ -706,6 +900,9 @@ function AdminDashboard() {
             <option value="BLOCKED">Blocked</option>
             <option value="UNBLOCKED">Unblocked</option>
             <option value="TRAINING_COMPLETED">Training Completed</option>
+            <option value="EXAM_ALERT">Exam Alert</option>
+            <option value="DESKTOP_WARNING">Desktop Warning</option>
+            <option value="DESKTOP_AUTO_LOCK">Desktop Auto Lock</option>
           </select>
         </div>
 
@@ -714,22 +911,31 @@ function AdminDashboard() {
             <div
               key={i}
               className={`border rounded-xl p-4 ${
-                a.type === "FRAUD"
+                a.type === "DESKTOP_AUTO_LOCK" || a.type === "FRAUD"
                   ? "bg-red-100"
-                  : a.type === "SUSPICIOUS"
-                  ? "bg-yellow-100"
+                  : a.type === "DESKTOP_WARNING" || a.type === "SUSPICIOUS"
+                  ? "bg-orange-100"
                   : a.type === "TRAINING_COMPLETED"
                   ? "bg-green-100"
                   : "bg-red-50"
               }`}
             >
-              <p><span className="font-semibold">User:</span> {a.userId}</p>
-              <p><span className="font-semibold">Type:</span> {a.type}</p>
-              <p><span className="font-semibold">Risk Score:</span> {a.riskScore || 0}</p>
-              <p><span className="font-semibold">Message:</span> {a.message}</p>
+              <p>
+                <span className="font-semibold">User:</span> {a.userId}
+              </p>
+              <p>
+                <span className="font-semibold">Type:</span> {a.type}
+              </p>
+              <p>
+                <span className="font-semibold">Risk Score:</span>{" "}
+                {a.riskScore || 0}
+              </p>
+              <p>
+                <span className="font-semibold">Message:</span> {a.message}
+              </p>
               <p>
                 <span className="font-semibold">Time:</span>{" "}
-                {a.createdAt ? new Date(a.createdAt).toLocaleString() : "N/A"}
+                {formatIST(a.createdAt)}
               </p>
             </div>
           ))}
@@ -747,7 +953,8 @@ function AdminDashboard() {
       const matchDate =
         !reportDateFilter ||
         (r.createdAt &&
-          new Date(r.createdAt).toISOString().slice(0, 10) === reportDateFilter);
+          new Date(r.createdAt).toISOString().slice(0, 10) ===
+            reportDateFilter);
 
       const matchUser =
         !reportUserFilter ||
@@ -782,12 +989,18 @@ function AdminDashboard() {
         <div className="space-y-4">
           {filteredReports.map((r, i) => (
             <div key={i} className="border rounded-xl p-4 bg-gray-50">
-              <p><span className="font-semibold">User:</span> {r.userId}</p>
-              <p><span className="font-semibold">Result:</span> {r.result}</p>
-              <p><span className="font-semibold">Warnings:</span> {r.warnings}</p>
+              <p>
+                <span className="font-semibold">User:</span> {r.userId}
+              </p>
+              <p>
+                <span className="font-semibold">Result:</span> {r.result}
+              </p>
+              <p>
+                <span className="font-semibold">Warnings:</span> {r.warnings}
+              </p>
               <p>
                 <span className="font-semibold">Time:</span>{" "}
-                {r.createdAt ? new Date(r.createdAt).toLocaleString() : "N/A"}
+                {formatIST(r.createdAt)}
               </p>
             </div>
           ))}
@@ -803,7 +1016,9 @@ function AdminDashboard() {
   return (
     <div className="min-h-screen bg-gray-100 flex">
       <div className="w-72 bg-white shadow-xl p-5">
-        <h1 className="text-2xl font-bold text-blue-700 mb-6">Admin Dashboard</h1>
+        <h1 className="text-2xl font-bold text-blue-700 mb-6">
+          Admin Dashboard
+        </h1>
 
         <SidebarButton label="Dashboard" value="dashboard" />
         <SidebarButton label="Users" value="users" />
