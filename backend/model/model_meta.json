@@ -1,0 +1,6 @@
+{
+  "feature_size": 12,
+  "users": 1,
+  "pairs": 5000,
+  "epochs": 40
+}
