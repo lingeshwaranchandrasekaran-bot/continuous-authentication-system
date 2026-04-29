@@ -27,6 +27,20 @@ try:
     client.server_info()
     db = client[DB_NAME]
     print("✅ MongoDB Connected")
+
+    try:
+        db.users.create_index("username")
+        db.training.create_index("userId")
+        db.analysis.create_index([("userId", 1), ("createdAt", -1)])
+        db.alerts.create_index([("userId", 1), ("createdAt", -1)])
+        db.exam.create_index([("userId", 1), ("createdAt", -1)])
+        db.login_logs.create_index([("username", 1), ("loginAt", -1)])
+        db.behavior_sessions.create_index([("userId", 1), ("createdAt", -1)])
+        db.user_decision_state.create_index("userId")
+        print("✅ MongoDB indexes ready")
+    except Exception as index_error:
+        print("⚠️ Index creation error:", index_error)
+
 except Exception as e:
     print("❌ MongoDB NOT connected:", e)
     db = None
@@ -47,10 +61,13 @@ def clean_value(value):
         if value.tzinfo is None:
             value = value.replace(tzinfo=timezone.utc)
         return value.isoformat()
+
     if isinstance(value, list):
         return [clean_value(v) for v in value]
+
     if isinstance(value, dict):
         return {k: clean_value(v) for k, v in value.items()}
+
     return value
 
 
@@ -227,8 +244,7 @@ def extract_features(data):
                     dt = curr["time"] - prev["time"]
 
                     if dt > 0:
-                        speed = np.sqrt(dx * dx + dy * dy) / dt
-                        all_mouse_speeds.append(float(speed))
+                        all_mouse_speeds.append(float(np.sqrt(dx * dx + dy * dy) / dt))
 
         if clicks:
             click_times = [c.get("time") for c in clicks if c.get("time") is not None]
@@ -268,7 +284,7 @@ def compute_training_statistics(samples):
             "featureVectors": [],
             "baselineMean": [0.0] * FEATURE_SIZE,
             "baselineStd": [0.0] * FEATURE_SIZE,
-            "personalThreshold": 0.68
+            "personalThreshold": 0.60
         }
 
     matrix = np.vstack(feature_vectors)
@@ -276,12 +292,13 @@ def compute_training_statistics(samples):
     baseline_std = np.std(matrix, axis=0)
 
     stability = float(np.mean(baseline_std))
+
     if stability < 20:
-        threshold = 0.64
+        threshold = 0.58
     elif stability < 60:
-        threshold = 0.68
+        threshold = 0.60
     else:
-        threshold = 0.72
+        threshold = 0.62
 
     return {
         "featureVectors": [normalize_vector(vec).tolist() for vec in feature_vectors],
@@ -295,9 +312,9 @@ def tolerance_check(base_mean, base_std, curr_vec):
     mismatch_count = 0
     alerts = []
 
-    tolerance = np.maximum(base_std * 2.0, np.array([
-        60.0, 40.0, 80.0, 60.0, 0.4, 0.3,
-        10.0, 5.0, 3.0, 8.0, 5.0, 800.0
+    tolerance = np.maximum(base_std * 2.5, np.array([
+        80.0, 60.0, 100.0, 80.0, 0.8, 0.6,
+        20.0, 10.0, 5.0, 12.0, 8.0, 1200.0
     ], dtype=np.float32))
 
     names = [
@@ -335,24 +352,24 @@ def desktop_rule_detection(events):
     risk = 0
     reasons = []
 
-    if focus >= 2:
-        risk += 30
+    if focus >= 6:
+        risk += 20
         reasons.append("FREQUENT_APP_SWITCHING")
 
-    if keys >= 80:
-        risk += 20
+    if keys >= 250:
+        risk += 15
         reasons.append("HIGH_TYPING_ACTIVITY")
 
-    if mouse_moves >= 200:
-        risk += 15
+    if mouse_moves >= 800:
+        risk += 10
         reasons.append("HIGH_MOUSE_ACTIVITY")
 
-    if clicks >= 30:
-        risk += 15
+    if clicks >= 100:
+        risk += 10
         reasons.append("HIGH_CLICK_ACTIVITY")
 
-    if paste > 0:
-        risk += 20
+    if paste > 3:
+        risk += 15
         reasons.append("PASTE_ACTIVITY")
 
     return min(risk, 100), reasons
@@ -362,24 +379,24 @@ def rule_based_detection(copy_paste=0, tab_switch=0, warnings=0, focus_lost=0, d
     risk = 0
     alerts = []
 
-    if copy_paste > 0:
-        risk += 20
+    if copy_paste > 2:
+        risk += 15
         alerts.append("COPY_PASTE")
 
-    if tab_switch > 0:
-        risk += 20
+    if tab_switch > 3:
+        risk += 15
         alerts.append("TAB_SWITCH")
 
-    if focus_lost > 0:
-        risk += 15
+    if focus_lost > 3:
+        risk += 10
         alerts.append("WINDOW_FOCUS_LOST")
 
-    if drag_count > 5:
-        risk += 10
+    if drag_count > 10:
+        risk += 8
         alerts.append("EXCESSIVE_DRAG_ACTIVITY")
 
-    if warnings > 0:
-        risk += min(warnings * 8, 24)
+    if warnings > 2:
+        risk += min(warnings * 5, 20)
         alerts.append("WARNING_COUNT")
 
     return risk, alerts
@@ -390,14 +407,14 @@ def ai_risk_from_similarity(similarity, threshold):
     alerts = []
 
     if similarity < threshold:
-        risk += 15
+        risk += 10
         alerts.append("AI_SIMILARITY_LOW")
 
-    if similarity < threshold - 0.10:
+    if similarity < threshold - 0.15:
         risk += 10
         alerts.append("AI_SIMILARITY_VERY_LOW")
 
-    if similarity < threshold - 0.20:
+    if similarity < threshold - 0.25:
         risk += 10
         alerts.append("AI_SIMILARITY_CRITICAL")
 
@@ -405,10 +422,10 @@ def ai_risk_from_similarity(similarity, threshold):
 
 
 def classify_user(similarity, mismatch_count, rule_risk, threshold):
-    if similarity >= threshold and mismatch_count <= 1 and rule_risk < 25:
+    if similarity >= threshold and mismatch_count <= 2 and rule_risk < 35:
         return "GENUINE"
 
-    if similarity < threshold - 0.20 and (mismatch_count >= 3 or rule_risk >= 35):
+    if similarity < threshold - 0.25 and (mismatch_count >= 5 or rule_risk >= 50):
         return "FRAUD"
 
     return "SUSPICIOUS"
@@ -429,20 +446,18 @@ def update_user_decision_state(user_id, status, risk):
     })
     last_statuses = last_statuses[-5:]
 
-    suspicious_or_fraud = sum(
-        1 for x in last_statuses if x["status"] in ["SUSPICIOUS", "FRAUD"]
-    )
+    suspicious_or_fraud = sum(1 for x in last_statuses if x["status"] in ["SUSPICIOUS", "FRAUD"])
     fraud_count = sum(1 for x in last_statuses if x["status"] == "FRAUD")
 
     warning_count = int(state.get("warningCount", 0))
     warning_triggered = False
     lock_required = False
 
-    if suspicious_or_fraud >= 3 or fraud_count >= 2 or risk >= 70:
+    if suspicious_or_fraud >= 5 or fraud_count >= 3 or risk >= 90:
         warning_count += 1
         warning_triggered = True
 
-    if warning_count >= 3:
+    if warning_count >= 5:
         lock_required = True
 
     db.user_decision_state.update_one(
@@ -481,7 +496,7 @@ def save_behavior_session_doc(user_id, role, page, events, desktop_risk=0, deskt
         "tabSwitches": len(events.get("tabSwitches", []))
     }
 
-    doc = {
+    db.behavior_sessions.insert_one({
         "userId": user_id,
         "role": role,
         "page": page,
@@ -491,26 +506,48 @@ def save_behavior_session_doc(user_id, role, page, events, desktop_risk=0, deskt
         "desktopRisk": int(desktop_risk),
         "desktopReasons": desktop_reasons or [],
         "createdAt": now_utc()
-    }
+    })
 
-    db.behavior_sessions.insert_one(doc)
     return summary, feature_vec
 
 
 def get_user_full_summary(username):
     user = db.users.find_one({"username": username}, {"_id": 0, "password": 0})
-    training = db.training.find_one({"userId": username}, {"_id": 0})
-    decision_state = db.user_decision_state.find_one({"userId": username}, {"_id": 0})
+
+    if not user:
+        user = db.users.find_one(
+            {"username": {"$regex": f"^{username}$", "$options": "i"}},
+            {"_id": 0, "password": 0}
+        )
+
+    if not user:
+        return {
+            "user": None,
+            "training": {},
+            "decisionState": {},
+            "reports": [],
+            "alerts": [],
+            "analysis": [],
+            "logins": [],
+            "sessions": []
+        }
+
+    real_username = user.get("username", username)
+    user_filter = {"userId": {"$regex": f"^{real_username}$", "$options": "i"}}
+    login_filter = {"username": {"$regex": f"^{real_username}$", "$options": "i"}}
+
+    training = db.training.find_one(user_filter, {"_id": 0}) or {}
+    decision_state = db.user_decision_state.find_one(user_filter, {"_id": 0}) or {}
 
     return clean_doc({
         "user": user,
         "training": training,
         "decisionState": decision_state,
-        "reports": list(db.exam.find({"userId": username}, {"_id": 0}).sort("createdAt", -1)),
-        "alerts": list(db.alerts.find({"userId": username}, {"_id": 0}).sort("createdAt", -1)),
-        "analysis": list(db.analysis.find({"userId": username}, {"_id": 0}).sort("createdAt", -1)),
-        "logins": list(db.login_logs.find({"username": username}, {"_id": 0}).sort("loginAt", -1)),
-        "sessions": list(db.behavior_sessions.find({"userId": username}, {"_id": 0}).sort("createdAt", -1))
+        "reports": list(db.exam.find(user_filter, {"_id": 0}).sort("createdAt", -1).limit(30)),
+        "alerts": list(db.alerts.find(user_filter, {"_id": 0}).sort("createdAt", -1).limit(30)),
+        "analysis": list(db.analysis.find(user_filter, {"_id": 0}).sort("createdAt", -1).limit(30)),
+        "logins": list(db.login_logs.find(login_filter, {"_id": 0}).sort("loginAt", -1).limit(30)),
+        "sessions": list(db.behavior_sessions.find(user_filter, {"_id": 0}).sort("createdAt", -1).limit(30))
     })
 
 
@@ -586,7 +623,10 @@ def desktop_evaluate():
         desktop_reasons
     )
 
-    baseline = db.training.find_one({"userId": user_id})
+    baseline = db.training.find_one(
+        {"userId": {"$regex": f"^{user_id}$", "$options": "i"}}
+    )
+
     if not baseline:
         return jsonify({
             "status": "NO_BASELINE",
@@ -600,19 +640,19 @@ def desktop_evaluate():
     current_vec = normalize_vector(feature_vec)
     base_mean = normalize_vector(baseline.get("baselineMean", [0.0] * FEATURE_SIZE))
     base_std = normalize_vector(baseline.get("baselineStd", [0.0] * FEATURE_SIZE))
-    threshold = float(baseline.get("personalThreshold", 0.68))
+    threshold = float(baseline.get("personalThreshold", 0.60))
 
     similarity = compare_vectors(base_mean, current_vec)
     mismatch_count, tolerance_alerts = tolerance_check(base_mean, base_std, current_vec)
     ai_score, ai_alerts = ai_risk_from_similarity(similarity, threshold)
 
-    risk = min(ai_score + desktop_rule_risk + int(mismatch_count * 8), 100)
+    risk = min(ai_score + desktop_rule_risk + int(mismatch_count * 5), 100)
     status = classify_user(similarity, mismatch_count, desktop_rule_risk, threshold)
     alerts = ai_alerts + tolerance_alerts + desktop_reasons
 
-    if risk >= 70:
+    if risk >= 90:
         status = "FRAUD"
-    elif risk >= 30 and status != "FRAUD":
+    elif risk >= 45 and status != "FRAUD":
         status = "SUSPICIOUS"
 
     decision = update_user_decision_state(user_id, status, risk)
@@ -636,7 +676,7 @@ def desktop_evaluate():
         save_alert(
             user_id,
             "DESKTOP_WARNING",
-            f"Desktop warning {decision['warningCount']}/3 | Risk {risk} | Status {status}",
+            f"Desktop warning {decision['warningCount']}/5 | Risk {risk} | Status {status}",
             risk
         )
 
@@ -644,7 +684,7 @@ def desktop_evaluate():
         save_alert(
             user_id,
             "DESKTOP_AUTO_LOCK",
-            "User reached 3 desktop warnings. Windows lock required.",
+            "User reached 5 desktop warnings. Windows lock required.",
             risk
         )
 
@@ -702,40 +742,62 @@ def login():
 
     data = request.json or {}
     username = data.get("username", "").strip()
-    password = data.get("password", "")
+    password = data.get("password", "").strip()
 
-    user = db.users.find_one({"username": username})
+    if not username or not password:
+        return jsonify({"error": "Username and password required"}), 400
+
+    user = db.users.find_one({
+        "username": {"$regex": f"^{username}$", "$options": "i"}
+    })
 
     if not user:
-        return jsonify({"error": "Invalid credentials"}), 401
+        return jsonify({"error": "Invalid username or password"}), 401
 
     if user.get("isBlocked", False):
         return jsonify({"error": "Your account has been blocked by admin"}), 403
 
-    stored_password = user["password"]
-    if isinstance(stored_password, str):
-        stored_password = stored_password.encode("utf-8")
+    stored_password = user.get("password", "")
+    password_ok = False
 
-    if bcrypt.checkpw(password.encode("utf-8"), stored_password):
-        role = user.get("role", "user")
-        has_baseline = db.training.find_one({"userId": username}) is not None
+    try:
+        stored_bytes = (
+            stored_password.encode("utf-8")
+            if isinstance(stored_password, str)
+            else stored_password
+        )
 
-        db.login_logs.insert_one({
-            "username": username,
+        password_ok = bcrypt.checkpw(
+            password.encode("utf-8"),
+            stored_bytes
+        )
+    except Exception:
+        password_ok = stored_password == password
+
+    if not password_ok:
+        return jsonify({"error": "Invalid username or password"}), 401
+
+    real_username = user.get("username", username)
+    role = user.get("role", "user")
+
+    has_baseline = db.training.find_one({
+        "userId": {"$regex": f"^{real_username}$", "$options": "i"}
+    }) is not None
+
+    db.login_logs.insert_one({
+        "username": real_username,
+        "role": role,
+        "loginAt": now_utc()
+    })
+
+    return jsonify({
+        "message": "Login success",
+        "user": {
+            "username": real_username,
             "role": role,
-            "loginAt": now_utc()
-        })
-
-        return jsonify({
-            "message": "Login success",
-            "user": {
-                "username": username,
-                "role": role,
-                "hasBaseline": has_baseline
-            }
-        })
-
-    return jsonify({"error": "Invalid credentials"}), 401
+            "hasBaseline": has_baseline
+        }
+    })
 
 
 @app.route("/api/admin/create-user", methods=["POST"])
@@ -749,14 +811,19 @@ def delete_user(username):
     if not ok:
         return resp, code
 
-    db.users.delete_one({"username": username})
-    db.training.delete_one({"userId": username})
-    db.exam.delete_many({"userId": username})
-    db.analysis.delete_many({"userId": username})
-    db.alerts.delete_many({"userId": username})
-    db.login_logs.delete_many({"username": username})
-    db.behavior_sessions.delete_many({"userId": username})
-    db.user_decision_state.delete_many({"userId": username})
+    user = db.users.find_one({"username": {"$regex": f"^{username}$", "$options": "i"}})
+    real_username = user.get("username", username) if user else username
+    user_filter = {"userId": {"$regex": f"^{real_username}$", "$options": "i"}}
+    login_filter = {"username": {"$regex": f"^{real_username}$", "$options": "i"}}
+
+    db.users.delete_many({"username": {"$regex": f"^{real_username}$", "$options": "i"}})
+    db.training.delete_many(user_filter)
+    db.exam.delete_many(user_filter)
+    db.analysis.delete_many(user_filter)
+    db.alerts.delete_many(user_filter)
+    db.login_logs.delete_many(login_filter)
+    db.behavior_sessions.delete_many(user_filter)
+    db.user_decision_state.delete_many(user_filter)
 
     return jsonify({"message": "User deleted successfully"})
 
@@ -768,7 +835,7 @@ def block_user(username):
         return resp, code
 
     result = db.users.update_one(
-        {"username": username},
+        {"username": {"$regex": f"^{username}$", "$options": "i"}},
         {"$set": {"isBlocked": True, "blockedAt": now_utc()}}
     )
 
@@ -786,7 +853,7 @@ def unblock_user(username):
         return resp, code
 
     result = db.users.update_one(
-        {"username": username},
+        {"username": {"$regex": f"^{username}$", "$options": "i"}},
         {"$set": {"isBlocked": False}, "$unset": {"blockedAt": ""}}
     )
 
@@ -803,8 +870,9 @@ def reset_training(username):
     if not ok:
         return resp, code
 
-    db.training.delete_one({"userId": username})
-    db.user_decision_state.delete_one({"userId": username})
+    user_filter = {"userId": {"$regex": f"^{username}$", "$options": "i"}}
+    db.training.delete_many(user_filter)
+    db.user_decision_state.delete_many(user_filter)
     return jsonify({"message": "Training reset successful"})
 
 
@@ -814,9 +882,10 @@ def reset_warnings(username):
     if not ok:
         return resp, code
 
+    user_filter = {"userId": {"$regex": f"^{username}$", "$options": "i"}}
     db.user_decision_state.update_one(
-        {"userId": username},
-        {"$set": {"warningCount": 0, "lastStatuses": [], "updatedAt": now_utc()}},
+        user_filter,
+        {"$set": {"userId": username, "warningCount": 0, "lastStatuses": [], "updatedAt": now_utc()}},
         upsert=True
     )
 
@@ -844,7 +913,7 @@ def save_training():
     stats = compute_training_statistics(samples)
 
     db.training.replace_one(
-        {"userId": user_id},
+        {"userId": {"$regex": f"^{user_id}$", "$options": "i"}},
         {
             "userId": user_id,
             "data": samples,
@@ -860,23 +929,14 @@ def save_training():
     )
 
     db.user_decision_state.update_one(
-        {"userId": user_id},
-        {"$set": {"warningCount": 0, "lastStatuses": [], "updatedAt": now_utc()}},
+        {"userId": {"$regex": f"^{user_id}$", "$options": "i"}},
+        {"$set": {"userId": user_id, "warningCount": 0, "lastStatuses": [], "updatedAt": now_utc()}},
         upsert=True
     )
 
-    save_alert(
-        user_id,
-        "TRAINING_COMPLETED",
-        f"Training completed with quality score {quality_score}%",
-        quality_score
-    )
+    save_alert(user_id, "TRAINING_COMPLETED", f"Training completed with quality score {quality_score}%", quality_score)
 
-    return jsonify({
-        "message": "Training saved successfully",
-        "qualityScore": quality_score,
-        "stats": stats
-    })
+    return jsonify({"message": "Training saved successfully", "qualityScore": quality_score, "stats": stats})
 
 
 @app.route("/api/training/baseline/<user_id>", methods=["GET"])
@@ -885,7 +945,7 @@ def get_baseline(user_id):
     if not ok:
         return resp, code
 
-    baseline = db.training.find_one({"userId": user_id}, {"_id": 0})
+    baseline = db.training.find_one({"userId": {"$regex": f"^{user_id}$", "$options": "i"}}, {"_id": 0})
     if not baseline:
         return jsonify({"error": "No baseline found"}), 404
 
@@ -912,8 +972,7 @@ def get_sentences():
     if not ok:
         return resp, code
 
-    sentences = list(db.sentences.find({}, {"_id": 0}).sort("createdAt", -1))
-    return jsonify(clean_docs(sentences))
+    return jsonify(clean_docs(list(db.sentences.find({}, {"_id": 0}).sort("createdAt", -1).limit(100))))
 
 
 @app.route("/api/behavior/analyze", methods=["POST"])
@@ -929,14 +988,14 @@ def analyze():
     if not user_id:
         return jsonify({"error": "userId required"}), 400
 
-    baseline = db.training.find_one({"userId": user_id})
+    baseline = db.training.find_one({"userId": {"$regex": f"^{user_id}$", "$options": "i"}})
     if not baseline:
         return jsonify({"error": "No baseline"}), 404
 
     current_vec = extract_features(samples)
     base_mean = normalize_vector(baseline.get("baselineMean"))
     base_std = normalize_vector(baseline.get("baselineStd"))
-    threshold = float(baseline.get("personalThreshold", 0.68))
+    threshold = float(baseline.get("personalThreshold", 0.60))
 
     copy_paste = int(data.get("copyPaste", 0))
     tab_switch = int(data.get("tabSwitch", 0))
@@ -947,28 +1006,21 @@ def analyze():
     similarity = compare_vectors(base_mean, current_vec)
     mismatch_count, tolerance_alerts = tolerance_check(base_mean, base_std, current_vec)
     ai_score, ai_alerts = ai_risk_from_similarity(similarity, threshold)
-    rule_score, rule_alerts = rule_based_detection(
-        copy_paste, tab_switch, warnings, focus_lost, drag_count
-    )
+    rule_score, rule_alerts = rule_based_detection(copy_paste, tab_switch, warnings, focus_lost, drag_count)
 
-    risk = min(ai_score + rule_score + int(mismatch_count * 8), 100)
+    risk = min(ai_score + rule_score + int(mismatch_count * 5), 100)
     status = classify_user(similarity, mismatch_count, rule_score, threshold)
 
-    if risk >= 60:
+    if risk >= 90:
         status = "FRAUD"
-    elif risk >= 25 and status != "FRAUD":
+    elif risk >= 45 and status != "FRAUD":
         status = "SUSPICIOUS"
 
     alerts = ai_alerts + rule_alerts + tolerance_alerts
     decision = update_user_decision_state(user_id, status, risk)
 
     if status in ["SUSPICIOUS", "FRAUD"]:
-        save_alert(
-            user_id,
-            status,
-            f"User {user_id} flagged as {status} with risk score {risk}",
-            risk
-        )
+        save_alert(user_id, status, f"User {user_id} flagged as {status} with risk score {risk}", risk)
 
     db.analysis.insert_one({
         "userId": user_id,
@@ -1023,11 +1075,7 @@ def save_behavior_session():
         data.get("desktopReasons", [])
     )
 
-    return jsonify({
-        "message": "Behavior session saved",
-        "summary": summary,
-        "featureVector": feature_vec
-    })
+    return jsonify({"message": "Behavior session saved", "summary": summary, "featureVector": feature_vec})
 
 
 @app.route("/api/exam/save", methods=["POST"])
@@ -1055,12 +1103,7 @@ def save_exam():
     })
 
     if warnings > 0 or result in ["SUSPICIOUS", "FRAUD", "FRAUD_AUTO_LOGOUT", "PATTERN_AUTO_LOGOUT"]:
-        save_alert(
-            user_id,
-            "EXAM_ALERT",
-            f"Exam finished with {warnings} warnings. Result: {result}",
-            warnings
-        )
+        save_alert(user_id, "EXAM_ALERT", f"Exam finished with {warnings} warnings. Result: {result}", warnings)
 
     return jsonify({"message": "Exam report saved"})
 
@@ -1071,8 +1114,7 @@ def get_users():
     if not ok:
         return resp, code
 
-    users = list(db.users.find({}, {"_id": 0, "password": 0}).sort("createdAt", -1))
-    return jsonify(clean_docs(users))
+    return jsonify(clean_docs(list(db.users.find({}, {"_id": 0, "password": 0}).sort("createdAt", -1).limit(200))))
 
 
 @app.route("/api/admin/reports", methods=["GET"])
@@ -1081,8 +1123,7 @@ def get_reports():
     if not ok:
         return resp, code
 
-    reports = list(db.exam.find({}, {"_id": 0}).sort("createdAt", -1))
-    return jsonify(clean_docs(reports))
+    return jsonify(clean_docs(list(db.exam.find({}, {"_id": 0}).sort("createdAt", -1).limit(100))))
 
 
 @app.route("/api/admin/analysis", methods=["GET"])
@@ -1091,8 +1132,7 @@ def get_analysis():
     if not ok:
         return resp, code
 
-    logs = list(db.analysis.find({}, {"_id": 0}).sort("createdAt", -1))
-    return jsonify(clean_docs(logs))
+    return jsonify(clean_docs(list(db.analysis.find({}, {"_id": 0}).sort("createdAt", -1).limit(100))))
 
 
 @app.route("/api/admin/alerts", methods=["GET"])
@@ -1101,8 +1141,7 @@ def get_alerts():
     if not ok:
         return resp, code
 
-    alerts = list(db.alerts.find({}, {"_id": 0}).sort("createdAt", -1))
-    return jsonify(clean_docs(alerts))
+    return jsonify(clean_docs(list(db.alerts.find({}, {"_id": 0}).sort("createdAt", -1).limit(100))))
 
 
 @app.route("/api/admin/login-logs", methods=["GET"])
@@ -1111,8 +1150,7 @@ def get_login_logs():
     if not ok:
         return resp, code
 
-    logs = list(db.login_logs.find({}, {"_id": 0}).sort("loginAt", -1))
-    return jsonify(clean_docs(logs))
+    return jsonify(clean_docs(list(db.login_logs.find({}, {"_id": 0}).sort("loginAt", -1).limit(100))))
 
 
 @app.route("/api/admin/user-details/<username>", methods=["GET"])
@@ -1121,11 +1159,17 @@ def get_user_details(username):
     if not ok:
         return resp, code
 
-    summary = get_user_full_summary(username)
-    if not summary["user"]:
-        return jsonify({"error": "User not found"}), 404
+    try:
+        summary = get_user_full_summary(username)
 
-    return jsonify(summary)
+        if not summary.get("user"):
+            return jsonify({"error": "User not found"}), 404
+
+        return jsonify(summary)
+
+    except Exception as e:
+        print("USER DETAILS ERROR:", str(e))
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/admin/stats", methods=["GET"])
@@ -1183,7 +1227,7 @@ def generate_user_report_pdf(username):
     line(f"Blocked: {user.get('isBlocked', False)}")
     line(f"Training Status: {training.get('status', 'Not Completed')}")
     line(f"Training Quality: {training.get('qualityScore', 0)}%")
-    line(f"Personal Threshold: {training.get('personalThreshold', 0.68)}")
+    line(f"Personal Threshold: {training.get('personalThreshold', 0.60)}")
     line(f"Warning Count: {state.get('warningCount', 0)}", 25)
 
     line("1. Exam Summary", bold=True)
@@ -1198,10 +1242,7 @@ def generate_user_report_pdf(username):
     line("3. Behavior Sessions", bold=True)
     for s in summary["sessions"][:10]:
         sm = s.get("summary", {})
-        line(
-            f"Page: {s.get('page')} | Keys: {sm.get('keys')} | Mouse: {sm.get('mouse')} | "
-            f"Clicks: {sm.get('clicks')} | Risk: {s.get('desktopRisk', 0)}"
-        )
+        line(f"Page: {s.get('page')} | Keys: {sm.get('keys')} | Mouse: {sm.get('mouse')} | Clicks: {sm.get('clicks')} | Risk: {s.get('desktopRisk', 0)}")
 
     line("4. Alerts", bold=True)
     for a in summary["alerts"][:10]:

@@ -31,7 +31,7 @@ function Login() {
         },
         body: JSON.stringify({
           username: username.trim(),
-          password
+          password: password.trim()
         })
       });
 
@@ -49,6 +49,12 @@ function Login() {
         return;
       }
 
+      if (roleMode === "user" && loggedUser.role === "admin") {
+        navigate("/admin");
+        return;
+      }
+
+      localStorage.setItem("user", JSON.stringify(loggedUser));
       localStorage.setItem("userId", loggedUser.username);
       localStorage.setItem("role", loggedUser.role);
       localStorage.setItem("hasBaseline", loggedUser.hasBaseline ? "true" : "false");
@@ -69,15 +75,10 @@ function Login() {
         return;
       }
 
-      if (!loggedUser.hasBaseline) {
-        navigate("/training");
-        return;
-      }
-
       navigate("/user");
     } catch (err) {
       console.error(err);
-      setError("Backend not reachable");
+      setError("Backend not reachable. Start app.py first.");
     } finally {
       setLoading(false);
     }

@@ -4,30 +4,29 @@ import { useNavigate } from "react-router-dom";
 function UserDashboard() {
   const navigate = useNavigate();
 
-  const [userId, setUserId] = useState("");
-  const [role, setRole] = useState("");
+  const [user, setUser] = useState(null);
   const [hasBaseline, setHasBaseline] = useState(false);
   const [loading, setLoading] = useState(true);
   const [statusMessage, setStatusMessage] = useState("");
   const [statusType, setStatusType] = useState("info");
 
   useEffect(() => {
-    const storedUser = localStorage.getItem("userId");
-    const storedRole = localStorage.getItem("role");
+    const storedUser = localStorage.getItem("user");
 
     if (!storedUser) {
       navigate("/");
       return;
     }
 
-    if (storedRole === "admin") {
+    const parsedUser = JSON.parse(storedUser);
+
+    if (parsedUser.role === "admin") {
       navigate("/admin");
       return;
     }
 
-    setUserId(storedUser);
-    setRole(storedRole || "user");
-    checkBaseline(storedUser);
+    setUser(parsedUser);
+    checkBaseline(parsedUser.username);
   }, [navigate]);
 
   const checkBaseline = async (username) => {
@@ -42,15 +41,20 @@ function UserDashboard() {
         setStatusMessage(
           "Training completed successfully. Your baseline typing and mouse behavior are already stored."
         );
+
+        const oldUser = JSON.parse(localStorage.getItem("user"));
+        localStorage.setItem(
+          "user",
+          JSON.stringify({ ...oldUser, hasBaseline: true })
+        );
       } else {
         setHasBaseline(false);
         setStatusType("warning");
         setStatusMessage(
-          "Training not completed yet. Complete the training module first to create your behavioral baseline."
+          "Training not completed yet. Complete the training module first. Exam module is visible but locked until training is completed."
         );
       }
     } catch (error) {
-      console.error(error);
       setHasBaseline(false);
       setStatusType("error");
       setStatusMessage("Unable to verify training status. Please try again.");
@@ -59,10 +63,15 @@ function UserDashboard() {
     }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem("userId");
-    localStorage.removeItem("role");
-    localStorage.removeItem("hasBaseline");
+  const handleLogout = async () => {
+    localStorage.removeItem("user");
+
+    try {
+      await fetch("http://localhost:5000/api/desktop/clear-user", {
+        method: "POST",
+      });
+    } catch (error) {}
+
     navigate("/");
   };
 
@@ -72,10 +81,17 @@ function UserDashboard() {
 
   const handleStartExam = () => {
     if (!hasBaseline) {
-      alert("Please complete training first.");
+      alert("Please complete training first. Exam is locked until baseline is created.");
       return;
     }
-    navigate("/exam");
+
+    const ok = window.confirm(
+      "Exam Instructions:\n\n1. Do not switch tabs.\n2. Do not copy paste.\n3. Keyboard and mouse behavior will be monitored.\n4. Suspicious activity will be reported to admin.\n\nProceed to exam?"
+    );
+
+    if (ok) {
+      navigate("/exam");
+    }
   };
 
   const statusBadgeClass =
@@ -87,10 +103,10 @@ function UserDashboard() {
       ? "bg-red-100 text-red-700"
       : "bg-blue-100 text-blue-700";
 
-  if (loading) {
+  if (loading || !user) {
     return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-        <div className="bg-white shadow rounded-2xl p-8">
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center">
+        <div className="bg-white shadow rounded-3xl p-8">
           <p className="text-lg font-semibold">Loading dashboard...</p>
         </div>
       </div>
@@ -98,125 +114,130 @@ function UserDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-100 p-6">
+    <div className="min-h-screen bg-slate-100 p-6">
       <div className="max-w-6xl mx-auto">
-        {/* Header */}
-        <div className="bg-white rounded-2xl shadow border p-6 mb-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div className="bg-white rounded-3xl shadow border p-6 mb-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-blue-700">User Dashboard</h1>
-            <p className="text-gray-600 mt-1">
-              Welcome, <span className="font-semibold">{userId}</span>
+            <h1 className="text-4xl font-bold text-blue-700">User Dashboard</h1>
+            <p className="text-slate-600 mt-2">
+              Welcome, <span className="font-semibold">{user.username}</span>
             </p>
-            <p className="text-sm text-gray-500 mt-1">
-              Role: <span className="font-medium">{role}</span>
+            <p className="text-sm text-slate-500 mt-1">
+              Role: <span className="font-medium">{user.role}</span>
             </p>
           </div>
 
           <button
             onClick={handleLogout}
-            className="bg-red-600 text-white px-5 py-3 rounded-xl hover:bg-red-700"
+            className="bg-red-600 text-white px-6 py-3 rounded-2xl font-bold hover:bg-red-700"
           >
             Logout
           </button>
         </div>
 
-        {/* Status */}
-        <div className="bg-white rounded-2xl shadow border p-6 mb-6">
-          <h2 className="text-xl font-bold mb-3">Training Status</h2>
-          <p className="text-gray-700 mb-4">{statusMessage}</p>
+        <div className="bg-white rounded-3xl shadow border p-6 mb-6">
+          <h2 className="text-2xl font-bold mb-3">Training Status</h2>
+          <p className="text-slate-700 mb-4">{statusMessage}</p>
 
-          <span className={`inline-block px-4 py-2 rounded-full text-sm font-semibold ${statusBadgeClass}`}>
+          <span className={`inline-block px-5 py-2 rounded-full text-sm font-bold ${statusBadgeClass}`}>
             {hasBaseline ? "Baseline Available" : "Baseline Not Available"}
           </span>
         </div>
 
-        {/* Cards */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {!hasBaseline && (
-            <div className="bg-white rounded-2xl shadow border p-6 border-l-4 border-green-500">
-              <h2 className="text-2xl font-bold text-green-700 mb-3">
-                Training Module
-              </h2>
-
-              <p className="text-gray-700 mb-4">
-                Complete this module so the system can collect your typing pattern
-                and mouse behavior and save them in MongoDB as baseline data.
-              </p>
-
-              <div className="bg-gray-50 border rounded-xl p-4 mb-4">
-                <h3 className="font-semibold mb-2">Training Includes</h3>
-                <ul className="space-y-2 text-gray-700">
-                  <li>• 10 MCQ tasks</li>
-                  <li>• 10 sentence typing tasks</li>
-                  <li>• File upload / interaction capture</li>
-                  <li>• Mouse movement and click analysis</li>
-                </ul>
-              </div>
-
-              <button
-                onClick={handleStartTraining}
-                className="bg-green-600 text-white px-5 py-3 rounded-xl hover:bg-green-700"
-              >
-                Start Training
-              </button>
-            </div>
-          )}
-
-          <div className="bg-white rounded-2xl shadow border p-6 border-l-4 border-blue-500">
-            <h2 className="text-2xl font-bold text-blue-700 mb-3">
-              Exam Module
+          <div className="bg-white rounded-3xl shadow border p-6 border-l-4 border-green-500">
+            <h2 className="text-3xl font-bold text-green-700 mb-3">
+              Training Module
             </h2>
 
-            <p className="text-gray-700 mb-4">
-              During the exam, the system monitors your current typing and mouse
-              behavior and compares it with the stored baseline to detect suspicious
-              activity and fraud.
+            <p className="text-slate-700 mb-4">
+              This module collects your typing rhythm, key hold time, mouse movement,
+              clicks, scrolls, and behavior pattern to create your personal baseline.
             </p>
 
-            <div className="bg-gray-50 border rounded-xl p-4 mb-4">
-              <h3 className="font-semibold mb-2">Exam Features</h3>
-              <ul className="space-y-2 text-gray-700">
-                <li>• MCQ and typing tasks</li>
-                <li>• Rule-based fraud detection</li>
-                <li>• Pattern-based user verification</li>
-                <li>• Alert generation and admin reporting</li>
+            <div className="bg-slate-50 border rounded-2xl p-4 mb-5">
+              <h3 className="font-bold mb-2">Training Instructions</h3>
+              <ul className="space-y-2 text-slate-700">
+                <li>• Type naturally without copying text.</li>
+                <li>• Complete 20–30 good samples.</li>
+                <li>• Use mouse movement, clicks, scroll, and drag normally.</li>
+                <li>• After training completion, logout and login again.</li>
               </ul>
             </div>
 
             <button
+              onClick={handleStartTraining}
+              className={`px-6 py-3 rounded-2xl text-white font-bold ${
+                hasBaseline
+                  ? "bg-green-500 hover:bg-green-600"
+                  : "bg-green-700 hover:bg-green-800"
+              }`}
+            >
+              {hasBaseline ? "Retrain / Improve Baseline" : "Start Training"}
+            </button>
+          </div>
+
+          <div className={`bg-white rounded-3xl shadow border p-6 border-l-4 ${
+            hasBaseline ? "border-blue-500" : "border-gray-400"
+          }`}>
+            <h2 className="text-3xl font-bold text-blue-700 mb-3">
+              Exam Module
+            </h2>
+
+            <p className="text-slate-700 mb-4">
+              Exam module is visible for all users, but exam writing is allowed
+              only after completing training and creating a behavioral baseline.
+            </p>
+
+            <div className="bg-slate-50 border rounded-2xl p-4 mb-5">
+              <h3 className="font-bold mb-2">Exam Instructions</h3>
+              <ul className="space-y-2 text-slate-700">
+                <li>• MCQ and typing tasks will be monitored.</li>
+                <li>• Tab switch and copy-paste are treated as suspicious.</li>
+                <li>• Your live behavior is compared with stored baseline.</li>
+                <li>• Alerts and reports are sent to admin dashboard.</li>
+              </ul>
+            </div>
+
+            {!hasBaseline && (
+              <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-2xl p-4 mb-5 font-semibold">
+                Exam Locked: Complete Training First
+              </div>
+            )}
+
+            <button
               onClick={handleStartExam}
               disabled={!hasBaseline}
-              className={`px-5 py-3 rounded-xl text-white ${
+              className={`px-6 py-3 rounded-2xl text-white font-bold ${
                 hasBaseline
                   ? "bg-blue-600 hover:bg-blue-700"
                   : "bg-gray-400 cursor-not-allowed"
               }`}
             >
-              Start Exam
+              {hasBaseline ? "Start Exam" : "Complete Training First"}
             </button>
           </div>
         </div>
 
-        {/* Info cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
-          <div className="bg-white rounded-2xl shadow border p-5">
-            <p className="text-sm text-gray-500">User</p>
-            <h3 className="text-xl font-bold text-blue-700">{userId}</h3>
-          </div>
-
-          <div className="bg-white rounded-2xl shadow border p-5">
-            <p className="text-sm text-gray-500">Current Role</p>
-            <h3 className="text-xl font-bold text-purple-700">{role}</h3>
-          </div>
-
-          <div className="bg-white rounded-2xl shadow border p-5">
-            <p className="text-sm text-gray-500">Baseline Status</p>
-            <h3 className={`text-xl font-bold ${hasBaseline ? "text-green-700" : "text-yellow-700"}`}>
-              {hasBaseline ? "Completed" : "Pending"}
-            </h3>
-          </div>
+          <InfoCard title="User" value={user.username} color="text-blue-700" />
+          <InfoCard title="Current Role" value={user.role} color="text-purple-700" />
+          <InfoCard
+            title="Baseline Status"
+            value={hasBaseline ? "Completed" : "Pending"}
+            color={hasBaseline ? "text-green-700" : "text-yellow-700"}
+          />
         </div>
       </div>
+    </div>
+  );
+}
+
+function InfoCard({ title, value, color }) {
+  return (
+    <div className="bg-white rounded-3xl shadow border p-5">
+      <p className="text-sm text-slate-500">{title}</p>
+      <h3 className={`text-xl font-bold ${color}`}>{value}</h3>
     </div>
   );
 }

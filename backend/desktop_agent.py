@@ -1,23 +1,56 @@
 import time
-import ctypes
 import requests
 import pygetwindow as gw
 from pynput import keyboard, mouse
+import ctypes
 
-API_BASE = "http://127.0.0.1:5000"
-CURRENT_USER_URL = f"{API_BASE}/api/desktop/current-user"
-DESKTOP_EVALUATE_URL = f"{API_BASE}/api/desktop/evaluate"
+API_URL = "http://127.0.0.1:5000/api/desktop/evaluate"
+CURRENT_USER_URL = "http://127.0.0.1:5000/api/desktop/current-user"
 
-SEND_LIMIT = 60
-SEND_INTERVAL_SECONDS = 10
+events = {
+    "keys": [],
+    "mouse": [],
+    "clicks": [],
+    "scrolls": [],
+    "drags": [],
+    "files": [],
+    "focusEvents": [],
+    "pasteEvents": [],
+    "tabSwitches": []
+}
 
-events = {}
 last_window = None
-last_send_time = time.time()
+last_activity_time = time.time()
+session_start_time = time.time()
+
+mouse_down_pos = None
+
+
+def lock_windows():
+    try:
+        ctypes.windll.user32.LockWorkStation()
+        print("🔒 Windows Locked")
+    except Exception as e:
+        print("Lock failed:", e)
+
+
+def get_logged_user():
+    try:
+        res = requests.get(CURRENT_USER_URL, timeout=5)
+        data = res.json()
+
+        user_id = data.get("userId", "unknown")
+        role = data.get("role", "user")
+
+        return user_id, role
+    except:
+        return "unknown", "user"
 
 
 def reset_events():
-    return {
+    global events
+
+    events = {
         "keys": [],
         "mouse": [],
         "clicks": [],
@@ -30,90 +63,106 @@ def reset_events():
     }
 
 
-events = reset_events()
+def meaningful_activity():
+    total = (
+        len(events["keys"]) +
+        len(events["mouse"]) +
+        len(events["clicks"]) +
+        len(events["scrolls"]) +
+        len(events["focusEvents"])
+    )
+
+    return total >= 40
 
 
-def get_current_user():
-    try:
-        res = requests.get(CURRENT_USER_URL, timeout=2)
-        data = res.json()
-        return data.get("userId", "unknown"), data.get("role", "user")
-    except Exception:
-        return "unknown", "user"
+def is_idle():
+    return (time.time() - last_activity_time) > 120
 
 
-def lock_windows():
-    print("🔒 3 warnings reached. Locking Windows...")
-    ctypes.windll.user32.LockWorkStation()
+def send_session(page="desktop_monitor"):
+    global last_activity_time
 
+    user_id, role = get_logged_user()
 
-def send_session(page="desktop_agent"):
-    global events, last_send_time
+    if not user_id or user_id == "unknown":
+        print("⚠️ No website user logged in")
+        reset_events()
+        return
 
-    user_id, role = get_current_user()
+    if not meaningful_activity():
+        print("⚠️ Not enough behavior data")
+        return
 
-    if user_id == "unknown":
-        print("⚠️ No website/desktop user logged in. Desktop data not sent.")
-        events = reset_events()
-        last_send_time = time.time()
+    if is_idle():
+        print("⚠️ User idle, skipping send")
+        reset_events()
         return
 
     try:
         res = requests.post(
-            DESKTOP_EVALUATE_URL,
+            API_URL,
             json={
                 "userId": user_id,
                 "role": role,
                 "page": page,
                 "events": events
             },
-            timeout=5
+            timeout=10
         )
 
         data = res.json()
 
         if not res.ok:
-            print("❌ Desktop evaluate error:", data)
-            events = reset_events()
+            print("❌ Backend rejected:", data)
             return
 
+        status = data.get("status", "UNKNOWN")
+        risk = data.get("riskScore", 0)
+        warning = data.get("warningCount", 0)
+        lock_required = data.get("lockRequired", False)
+
         print(
-            f"✅ Desktop behavior sent for {user_id} | "
-            f"Status: {data.get('status')} | "
-            f"Risk: {data.get('riskScore')} | "
-            f"Warning: {data.get('warningCount')}/3"
+            f"✅ Sent | {user_id} | {status} | Risk: {risk} | Warning: {warning}/3"
         )
 
-        if data.get("warningTriggered"):
-            print("⚠️ Desktop warning triggered:", data.get("alerts", []))
-
-        if data.get("lockRequired"):
+        if lock_required:
+            print("🚨 Auto lock triggered")
             lock_windows()
 
-        events = reset_events()
-        last_send_time = time.time()
+        reset_events()
 
     except Exception as e:
         print("❌ Backend error:", e)
 
 
+def touch_activity():
+    global last_activity_time
+    last_activity_time = time.time()
+
+
 def on_key_press(key):
+    touch_activity()
+
     events["keys"].append({
-        "key": "KEY_PRESSED",
+        "key": str(key),
         "type": "down",
         "time": int(time.time() * 1000)
     })
 
 
 def on_key_release(key):
+    touch_activity()
+
     events["keys"].append({
-        "key": "KEY_RELEASED",
+        "key": str(key),
         "type": "up",
         "time": int(time.time() * 1000)
     })
 
 
 def on_move(x, y):
+    touch_activity()
+
     events["mouse"].append({
         "type": "move",
         "x": x,
@@ -123,7 +172,13 @@ def on_move(x, y):
 
 
 def on_click(x, y, button, pressed):
+    global mouse_down_pos
+
+    touch_activity()
+
     if pressed:
+        mouse_down_pos = (x, y)
+
         events["clicks"].append({
             "type": "click",
             "x": x,
@@ -132,8 +187,26 @@ def on_click(x, y, button, pressed):
             "time": int(time.time() * 1000)
         })
 
+    else:
+        if mouse_down_pos:
+            dx = abs(x - mouse_down_pos[0])
+            dy = abs(y - mouse_down_pos[1])
+
+            if dx > 20 or dy > 20:
+                events["drags"].append({
+                    "startX": mouse_down_pos[0],
+                    "startY": mouse_down_pos[1],
+                    "endX": x,
+                    "endY": y,
+                    "time": int(time.time() * 1000)
+                })
+
+        mouse_down_pos = None
+
 
 def on_scroll(x, y, dx, dy):
+    touch_activity()
+
     events["scrolls"].append({
         "type": "scroll",
         "x": x,
@@ -151,17 +224,19 @@ def monitor_window():
         window = gw.getActiveWindow()
 
         if window:
-            title = window.title or "Unknown Window"
+            title = window.title.strip()
 
-            if title != last_window:
+            if title and title != last_window:
                 events["focusEvents"].append({
-                    "type": "active_window_change",
-                    "window": title[:120],
+                    "type": "window_change",
+                    "window": title,
                     "time": int(time.time() * 1000)
                 })
 
+                print("🪟 Active Window:", title)
                 last_window = title
-    except Exception:
+
+    except:
         pass
 
 
@@ -179,25 +254,18 @@ mouse_listener = mouse.Listener(
 keyboard_listener.start()
 mouse_listener.start()
 
-print("✅ Desktop Agent Running...")
-print("✅ Privacy-safe mode: actual typed text is NOT stored")
-print("✅ Monitoring Word / Excel / Notepad / Browser / VS Code / Desktop usage")
-print("⚠️ 3 warnings = Windows auto lock")
+print("✅ Smart Desktop Agent Running...")
 
 while True:
     monitor_window()
 
-    total_events = (
-        len(events["keys"]) +
-        len(events["mouse"]) +
-        len(events["clicks"]) +
-        len(events["scrolls"]) +
-        len(events["focusEvents"])
-    )
+    # first 10 sec ignore
+    if (time.time() - session_start_time) < 10:
+        time.sleep(3)
+        continue
 
-    time_due = time.time() - last_send_time >= SEND_INTERVAL_SECONDS
-
-    if total_events >= SEND_LIMIT or (time_due and total_events > 0):
+    # send every 30 sec
+    if (time.time() - session_start_time) % 30 < 3:
         send_session()
 
-    time.sleep(2)
+    time.sleep(3)

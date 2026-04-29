@@ -1,677 +1,564 @@
-import React, { useMemo, useRef, useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import React, { useEffect, useRef, useState } from "react";
 
-const trainingTasks = [
-  { type: "mcq", question: "Which protocol is secure for web communication?", options: ["HTTP", "FTP", "HTTPS", "SMTP"] },
-  { type: "mcq", question: "Which device connects multiple networks?", options: ["Hub", "Switch", "Router", "Repeater"] },
-  { type: "mcq", question: "Which database is used in this project?", options: ["MySQL", "MongoDB", "SQLite", "Oracle"] },
-  { type: "mcq", question: "Which model is used for user behavior comparison?", options: ["CNN", "Siamese Neural Network", "GAN", "KNN"] },
-  { type: "mcq", question: "Which framework is used in the frontend?", options: ["React", "Django", "Flask", "Laravel"] },
-  { type: "mcq", question: "Which framework is used in the backend?", options: ["Spring", "Flask", "Vue", "Angular"] },
-  { type: "mcq", question: "Which action is suspicious during exam?", options: ["Copy paste", "Tab switch", "Window blur", "All"] },
-  { type: "mcq", question: "Which command shows IP in Linux?", options: ["pwd", "ls", "ip a", "mkdir"] },
-  { type: "mcq", question: "Which feature measures key press duration?", options: ["Hold time", "Mouse speed", "Flight time", "Latency"] },
-  { type: "mcq", question: "Which collection stores baseline data?", options: ["users", "training", "alerts", "login_logs"] },
+const API = "http://localhost:5000";
+const TARGET_SAMPLES = 30;
 
-  { type: "sentence", question: "Type exactly: UserID-2026#Test@AI!" },
-  { type: "sentence", question: "Type exactly: ShiftSymbols ! @ # $ % ^ & * ( )" },
-  { type: "sentence", question: "Type exactly: Numbers12345 and MixedCASE typing." },
-  { type: "sentence", question: "Type exactly: Punctuation .,;:'\"/? < > [ ] { }" },
-  { type: "sentence", question: "Type exactly: Secure_Login-User01@Project2026" },
-  { type: "sentence", question: "Type exactly: Keyboard+Mouse_Behavior=Monitor#1" },
-  { type: "sentence", question: "Type exactly: QuickBrownFOX2026! slow? fast." },
-  { type: "sentence", question: "Type exactly: Data_Sample(1) -> ready_to_save." },
-  { type: "sentence", question: "Type exactly: AdminCreatesUser; UserCompletesTraining." },
-  { type: "sentence", question: "Type exactly: Final-Test_Line#10 with 98765." },
+const defaultEvents = () => ({
+  keys: [],
+  mouse: [],
+  clicks: [],
+  scrolls: [],
+  drags: [],
+  files: [],
+  focusEvents: [],
+  pasteEvents: [],
+  tabSwitches: [],
+  holdTimes: [],
+  flightTimes: [],
+  mouseSpeeds: [],
+  mcqAnswers: [],
+});
 
-  { type: "file", question: "Upload any document file." },
-  { type: "file", question: "Upload any image file." },
-  { type: "file", question: "Upload any PDF or text file." },
+const mcqQuestions = [
+  {
+    q: "Which database is used in this project?",
+    options: ["MySQL", "MongoDB", "Oracle", "SQLite"],
+  },
+  {
+    q: "Which model compares user behavior patterns?",
+    options: ["Siamese Neural Network", "KNN", "Naive Bayes", "SVM"],
+  },
+  {
+    q: "Hold time means?",
+    options: ["Mouse speed", "Key press duration", "Tab switch", "File upload"],
+  },
+  {
+    q: "Which activity is suspicious in exam?",
+    options: ["Copy Paste", "Tab Switch", "Window Blur", "All of the above"],
+  },
+  {
+    q: "Continuous authentication works after?",
+    options: ["Login", "Shutdown", "Formatting", "Uninstalling"],
+  },
+];
 
-  { type: "drag", question: "Drag the box into the target area." },
-  { type: "drag", question: "Drag the box from left side to the bottom-right target." }
+const sentences = [
+  "Continuous authentication improves security using typing rhythm and mouse behavior.",
+  "User monitoring detects suspicious activity during online examination sessions.",
+  "Hold time and flight time are important keystroke dynamics features.",
+  "MongoDB stores user baseline, alerts, reports, and login activity logs.",
+  "Repeated abnormal behavior can result in automatic user logout.",
 ];
 
 function Training() {
-  const navigate = useNavigate();
-
-  const [started, setStarted] = useState(false);
-  const [index, setIndex] = useState(0);
-  const [textAnswer, setTextAnswer] = useState("");
-  const [selectedOption, setSelectedOption] = useState("");
-  const [taskData, setTaskData] = useState([]);
-  const [submitting, setSubmitting] = useState(false);
-
-  const [keys, setKeys] = useState([]);
-  const [mouse, setMouse] = useState([]);
-  const [clicks, setClicks] = useState([]);
-  const [scrolls, setScrolls] = useState([]);
-  const [holdTimes, setHoldTimes] = useState([]);
-  const [flightTimes, setFlightTimes] = useState([]);
-  const [mouseSpeeds, setMouseSpeeds] = useState([]);
-  const [dragEvents, setDragEvents] = useState([]);
-  const [fileEvents, setFileEvents] = useState([]);
-
-  const [notice, setNotice] = useState("");
-  const [errorMessage, setErrorMessage] = useState("");
+  const [user, setUser] = useState(null);
+  const [samples, setSamples] = useState([]);
+  const [typedText, setTypedText] = useState("");
+  const [currentSentence, setCurrentSentence] = useState(sentences[0]);
+  const [mcqIndex, setMcqIndex] = useState(0);
+  const [selectedMcq, setSelectedMcq] = useState("");
   const [qualityScore, setQualityScore] = useState(0);
-
-  const [dragBoxPos, setDragBoxPos] = useState({ x: 0, y: 0 });
-  const [isDragging, setIsDragging] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [dragDone, setDragDone] = useState(false);
+  const [fileName, setFileName] = useState("");
 
-  const keyDownMapRef = useRef({});
+  const eventsRef = useRef(defaultEvents());
+  const lastKeyDownRef = useRef({});
   const lastKeyTimeRef = useRef(null);
   const lastMouseRef = useRef(null);
   const dragStartRef = useRef(null);
-  const dragContainerRef = useRef(null);
 
-  const currentTask = useMemo(() => trainingTasks[index], [index]);
-  const userId = localStorage.getItem("userId") || "user1";
-  const role = localStorage.getItem("role") || "user";
+  useEffect(() => {
+    const savedUser = JSON.parse(localStorage.getItem("user"));
 
-  const showNotice = (message) => {
-    setNotice(message);
-    setTimeout(() => setNotice(""), 2200);
-  };
+    if (!savedUser) {
+      alert("Please login first");
+      window.location.href = "/";
+      return;
+    }
 
-  const calculateQualityScore = (samples) => {
-    let score = 0;
+    setUser(savedUser);
 
-    const totalKeys = samples.reduce((sum, s) => sum + (s.keys?.length || 0), 0);
-    const totalMouse = samples.reduce((sum, s) => sum + (s.mouse?.length || 0), 0);
-    const totalClicks = samples.reduce((sum, s) => sum + (s.clicks?.length || 0), 0);
-    const totalHold = samples.reduce((sum, s) => sum + (s.holdTimes?.length || 0), 0);
-    const totalFlight = samples.reduce((sum, s) => sum + (s.flightTimes?.length || 0), 0);
-    const totalFiles = samples.reduce((sum, s) => sum + (s.fileEvents?.length || 0), 0);
-    const totalDrags = samples.reduce((sum, s) => sum + (s.dragEvents?.length || 0), 0);
-    const totalScrolls = samples.reduce((sum, s) => sum + (s.scrolls?.length || 0), 0);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("blur", handleWindowBlur);
+    window.addEventListener("paste", handlePaste);
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mousedown", handleMouseDown);
+    window.addEventListener("mouseup", handleMouseUp);
+    window.addEventListener("click", handleClick);
+    window.addEventListener("wheel", handleScroll);
 
-    if (samples.length >= 20) score += 20;
-    if (totalKeys >= 80) score += 20;
-    if (totalMouse >= 80) score += 15;
-    if (totalClicks >= 8) score += 10;
-    if (totalHold >= 30) score += 15;
-    if (totalFlight >= 30) score += 10;
-    if (totalFiles >= 3) score += 4;
-    if (totalDrags >= 2) score += 4;
-    if (totalScrolls >= 2) score += 2;
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("blur", handleWindowBlur);
+      window.removeEventListener("paste", handlePaste);
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mousedown", handleMouseDown);
+      window.removeEventListener("mouseup", handleMouseUp);
+      window.removeEventListener("click", handleClick);
+      window.removeEventListener("wheel", handleScroll);
+    };
+  }, []);
 
-    return Math.min(score, 100);
-  };
+  useEffect(() => {
+    calculateQuality();
+  }, [samples]);
 
-  const saveBehaviorSession = async (events, page = "training") => {
-    try {
-      await fetch("http://localhost:5000/api/behavior/session-save", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          userId,
-          role,
-          page,
-          events
-        })
+  const now = () => Date.now();
+
+  const handleVisibilityChange = () => {
+    if (document.hidden) {
+      eventsRef.current.tabSwitches.push({
+        type: "tab_switch",
+        time: now(),
       });
-    } catch (error) {
-      console.error("Training behavior session save failed:", error);
     }
   };
 
-  useEffect(() => {
-    const moveHandler = (e) => handleMouseDragMove(e);
-    const upHandler = () => handleMouseDragEnd();
+  const handleWindowBlur = () => {
+    eventsRef.current.focusEvents.push({
+      type: "window_blur",
+      time: now(),
+    });
+  };
 
-    window.addEventListener("mousemove", moveHandler);
-    window.addEventListener("mouseup", upHandler);
-
-    return () => {
-      window.removeEventListener("mousemove", moveHandler);
-      window.removeEventListener("mouseup", upHandler);
-    };
-  }, [isDragging, dragBoxPos]);
+  const handlePaste = () => {
+    eventsRef.current.pasteEvents.push({
+      type: "paste",
+      time: now(),
+    });
+  };
 
   const handleKeyDown = (e) => {
-    const now = Date.now();
+    const t = now();
 
-    setKeys((prev) => [
-      ...prev,
-      { key: e.key, type: "down", time: now }
-    ]);
+    eventsRef.current.keys.push({
+      key: e.key,
+      type: "down",
+      time: t,
+    });
 
-    keyDownMapRef.current[e.key] = now;
-
-    if (lastKeyTimeRef.current !== null) {
-      const flight = now - lastKeyTimeRef.current;
-      if (flight > 0) {
-        setFlightTimes((prev) => [...prev, flight]);
+    if (lastKeyTimeRef.current) {
+      const flight = t - lastKeyTimeRef.current;
+      if (flight > 0 && flight < 2000) {
+        eventsRef.current.flightTimes.push(flight);
       }
     }
 
-    lastKeyTimeRef.current = now;
+    lastKeyDownRef.current[e.key] = t;
+    lastKeyTimeRef.current = t;
   };
 
   const handleKeyUp = (e) => {
-    const now = Date.now();
+    const t = now();
 
-    setKeys((prev) => [
-      ...prev,
-      { key: e.key, type: "up", time: now }
-    ]);
+    eventsRef.current.keys.push({
+      key: e.key,
+      type: "up",
+      time: t,
+    });
 
-    const downTime = keyDownMapRef.current[e.key];
-
+    const downTime = lastKeyDownRef.current[e.key];
     if (downTime) {
-      const hold = now - downTime;
-      if (hold > 0) {
-        setHoldTimes((prev) => [...prev, hold]);
+      const hold = t - downTime;
+      if (hold > 0 && hold < 3000) {
+        eventsRef.current.holdTimes.push(hold);
       }
     }
   };
 
   const handleMouseMove = (e) => {
-    const now = Date.now();
+    const t = now();
 
-    setMouse((prev) => [
-      ...prev,
-      { type: "move", x: e.clientX, y: e.clientY, time: now }
-    ]);
+    eventsRef.current.mouse.push({
+      type: "move",
+      x: e.clientX,
+      y: e.clientY,
+      time: t,
+    });
 
     if (lastMouseRef.current) {
       const dx = e.clientX - lastMouseRef.current.x;
       const dy = e.clientY - lastMouseRef.current.y;
-      const dt = now - lastMouseRef.current.time;
+      const dt = t - lastMouseRef.current.time;
 
       if (dt > 0) {
         const speed = Math.sqrt(dx * dx + dy * dy) / dt;
-        setMouseSpeeds((prev) => [...prev, speed]);
+        eventsRef.current.mouseSpeeds.push(speed);
       }
     }
 
-    lastMouseRef.current = { x: e.clientX, y: e.clientY, time: now };
-  };
-
-  const handleClick = (e) => {
-    setClicks((prev) => [
-      ...prev,
-      {
-        type: "click",
-        x: e.clientX,
-        y: e.clientY,
-        button: e.button,
-        time: Date.now()
-      }
-    ]);
-  };
-
-  const handleWheel = (e) => {
-    const data = {
-      type: "scroll",
-      deltaY: e.deltaY,
-      time: Date.now()
+    lastMouseRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      time: t,
     };
-
-    setScrolls((prev) => [...prev, data]);
-    setMouse((prev) => [...prev, data]);
   };
 
-  const handleFileUpload = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setFileEvents((prev) => [
-      ...prev,
-      {
-        fileName: file.name,
-        fileSize: file.size,
-        fileType: file.type,
-        time: Date.now()
-      }
-    ]);
-
-    setErrorMessage("");
-    showNotice(`File captured: ${file.name}`);
+  const handleMouseDown = (e) => {
+    dragStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      time: now(),
+    };
   };
 
-  const handleMouseDragStart = () => {
-    dragStartRef.current = Date.now();
-    setIsDragging(true);
-    setErrorMessage("");
-  };
+  const handleMouseUp = (e) => {
+    if (!dragStartRef.current) return;
 
-  const handleMouseDragMove = (e) => {
-    if (!isDragging || !dragContainerRef.current) return;
+    const dx = Math.abs(e.clientX - dragStartRef.current.x);
+    const dy = Math.abs(e.clientY - dragStartRef.current.y);
 
-    const rect = dragContainerRef.current.getBoundingClientRect();
-
-    let newX = e.clientX - rect.left - 48;
-    let newY = e.clientY - rect.top - 48;
-
-    if (newX < 0) newX = 0;
-    if (newY < 0) newY = 0;
-    if (newX > rect.width - 96) newX = rect.width - 96;
-    if (newY > rect.height - 96) newY = rect.height - 96;
-
-    setDragBoxPos({ x: newX, y: newY });
-  };
-
-  const handleMouseDragEnd = () => {
-    if (!isDragging) return;
-
-    const end = Date.now();
-    const start = dragStartRef.current || end;
-
-    const reachedTarget = dragBoxPos.x > 260 && dragBoxPos.y > 130;
-
-    if (reachedTarget) {
-      setDragEvents((prev) => [
-        ...prev,
-        {
-          type: "drag",
-          startTime: start,
-          endTime: end,
-          duration: end - start,
-          finalX: dragBoxPos.x,
-          finalY: dragBoxPos.y,
-          success: true
-        }
-      ]);
-
-      setDragDone(true);
-      showNotice("Drag task completed");
-    } else {
-      showNotice("Drag not reached target. Try again.");
+    if (dx > 20 || dy > 20) {
+      eventsRef.current.drags.push({
+        type: "drag",
+        startX: dragStartRef.current.x,
+        startY: dragStartRef.current.y,
+        endX: e.clientX,
+        endY: e.clientY,
+        startTime: dragStartRef.current.time,
+        endTime: now(),
+      });
     }
 
-    setIsDragging(false);
-  };
-
-  const resetCurrentCapture = () => {
-    setTextAnswer("");
-    setSelectedOption("");
-    setKeys([]);
-    setMouse([]);
-    setClicks([]);
-    setScrolls([]);
-    setHoldTimes([]);
-    setFlightTimes([]);
-    setMouseSpeeds([]);
-    setDragEvents([]);
-    setFileEvents([]);
-    setErrorMessage("");
-
-    setDragBoxPos({ x: 0, y: 0 });
-    setIsDragging(false);
-    setDragDone(false);
-
-    keyDownMapRef.current = {};
-    lastKeyTimeRef.current = null;
-    lastMouseRef.current = null;
     dragStartRef.current = null;
   };
 
-  const buildCurrentTaskRecord = () => {
-    return {
-      taskId: index + 1,
-      type: currentTask.type,
-      question: currentTask.question,
-      answer: currentTask.type === "mcq" ? selectedOption : textAnswer,
-      keys,
-      mouse,
-      clicks,
-      scrolls,
-      holdTimes,
-      flightTimes,
-      mouseSpeeds,
-      dragEvents,
-      fileEvents,
-      createdAt: Date.now()
+  const handleClick = (e) => {
+    eventsRef.current.clicks.push({
+      type: "click",
+      x: e.clientX,
+      y: e.clientY,
+      button: e.button,
+      time: now(),
+    });
+  };
+
+  const handleScroll = (e) => {
+    eventsRef.current.scrolls.push({
+      type: "scroll",
+      deltaY: e.deltaY,
+      time: now(),
+    });
+  };
+
+  const handleMcqSelect = (option) => {
+    setSelectedMcq(option);
+
+    eventsRef.current.mcqAnswers.push({
+      question: mcqQuestions[mcqIndex].q,
+      selected: option,
+      time: now(),
+    });
+
+    setTimeout(() => {
+      setMcqIndex((prev) => (prev + 1) % mcqQuestions.length);
+      setSelectedMcq("");
+    }, 400);
+  };
+
+  const handleFileChoose = (e) => {
+    const file = e.target.files?.[0];
+
+    if (!file) return;
+
+    setFileName(file.name);
+
+    eventsRef.current.files.push({
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      time: now(),
+    });
+  };
+
+  const generateSentence = () => {
+    const random = sentences[Math.floor(Math.random() * sentences.length)];
+    setCurrentSentence(random);
+    setTypedText("");
+  };
+
+  const calculateQuality = () => {
+    const sampleCountScore = Math.min((samples.length / TARGET_SAMPLES) * 40, 40);
+
+    const totalKeys = samples.reduce((a, s) => a + (s.keys?.length || 0), 0);
+    const totalMouse = samples.reduce((a, s) => a + (s.mouse?.length || 0), 0);
+    const totalClicks = samples.reduce((a, s) => a + (s.clicks?.length || 0), 0);
+    const totalDrags = samples.reduce((a, s) => a + (s.drags?.length || 0), 0);
+    const totalFiles = samples.reduce((a, s) => a + (s.files?.length || 0), 0);
+    const totalMcq = samples.reduce((a, s) => a + (s.mcqAnswers?.length || 0), 0);
+    const totalHold = samples.reduce((a, s) => a + (s.holdTimes?.length || 0), 0);
+
+    let behaviorScore = 0;
+
+    if (totalKeys > 200) behaviorScore += 12;
+    if (totalMouse > 150) behaviorScore += 12;
+    if (totalClicks > 30) behaviorScore += 8;
+    if (totalHold > 50) behaviorScore += 12;
+    if (totalDrags > 3) behaviorScore += 8;
+    if (totalFiles > 0) behaviorScore += 4;
+    if (totalMcq > 5) behaviorScore += 4;
+
+    setQualityScore(Math.min(Math.round(sampleCountScore + behaviorScore), 100));
+  };
+
+  const saveSample = () => {
+    if (typedText.trim().length < 15) {
+      alert("Please type the sentence properly before saving sample");
+      return;
+    }
+
+    if (eventsRef.current.mcqAnswers.length < 1) {
+      alert("Please answer at least one MCQ before saving sample");
+      return;
+    }
+
+    const current = {
+      ...eventsRef.current,
+      typedLength: typedText.length,
+      createdAt: now(),
     };
+
+    setSamples((prev) => [...prev, current]);
+
+    eventsRef.current = defaultEvents();
+    lastKeyDownRef.current = {};
+    lastKeyTimeRef.current = null;
+    lastMouseRef.current = null;
+    dragStartRef.current = null;
+
+    setTypedText("");
+    setSelectedMcq("");
+    setDragDone(false);
+    setFileName("");
+    generateSentence();
   };
 
-  const isTaskValid = () => {
-    if (currentTask.type === "mcq") {
-      if (!selectedOption) {
-        setErrorMessage("Select one option before moving to the next task.");
-        return false;
-      }
-      return true;
-    }
+  const saveTraining = async () => {
+    if (!user) return;
 
-    if (currentTask.type === "sentence") {
-      if (!textAnswer.trim()) {
-        setErrorMessage("Type the sentence before moving to the next task.");
-        return false;
-      }
-
-      if (keys.length < 6) {
-        setErrorMessage("Typing data is too low. Please type normally.");
-        return false;
-      }
-
-      return true;
-    }
-
-    if (currentTask.type === "file") {
-      if (fileEvents.length === 0) {
-        setErrorMessage("Upload a file before moving to the next task.");
-        return false;
-      }
-      return true;
-    }
-
-    if (currentTask.type === "drag") {
-      if (!dragDone || dragEvents.length === 0) {
-        setErrorMessage("Complete the drag task properly before moving to the next task.");
-        return false;
-      }
-      return true;
-    }
-
-    return true;
-  };
-
-  const handleRedoTask = () => {
-    resetCurrentCapture();
-    showNotice("Current task cleared. Please do it again.");
-  };
-
-  const handleStartTraining = () => {
-    setStarted(true);
-    showNotice("Training started");
-  };
-
-  const handleNext = async () => {
-    if (!isTaskValid()) return;
-
-    const currentRecord = buildCurrentTaskRecord();
-    const updatedData = [...taskData, currentRecord];
-    const currentQuality = calculateQualityScore(updatedData);
-
-    setTaskData(updatedData);
-    setQualityScore(currentQuality);
-
-    await saveBehaviorSession(currentRecord, "training_task");
-
-    if (index < trainingTasks.length - 1) {
-      setIndex((prev) => prev + 1);
-      resetCurrentCapture();
+    if (samples.length < 15) {
+      alert("Need minimum 15 good samples");
       return;
     }
 
-    if (currentQuality < 60) {
-      setErrorMessage(
-        `Training quality low (${currentQuality}%). Please redo training and type/move naturally.`
-      );
-      return;
-    }
+    setIsSaving(true);
 
     try {
-      setSubmitting(true);
-
-      const res = await fetch("http://localhost:5000/api/training/save-baseline", {
+      const res = await fetch(`${API}/api/training/save-baseline`, {
         method: "POST",
         headers: {
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          userId,
-          samples: updatedData,
-          qualityScore: currentQuality
-        })
+          userId: user.username,
+          samples,
+          qualityScore,
+        }),
       });
 
       const data = await res.json();
 
       if (!res.ok) {
-        setErrorMessage(data.error || "Training save failed");
+        alert(data.error || "Training save failed");
+        setIsSaving(false);
         return;
       }
 
-      localStorage.setItem("hasBaseline", "true");
-      showNotice(`Training completed successfully. Quality: ${currentQuality}%`);
+      alert("Training completed successfully. Please login again.");
 
-      setTimeout(() => {
-        navigate("/user");
-      }, 1200);
+      localStorage.removeItem("user");
+      localStorage.removeItem("userId");
+      localStorage.removeItem("role");
+      localStorage.removeItem("hasBaseline");
+
+      window.location.href = "/";
     } catch (error) {
-      console.error(error);
-      setErrorMessage("Error saving training");
-    } finally {
-      setSubmitting(false);
+      alert("Backend connection failed");
     }
+
+    setIsSaving(false);
   };
 
-  const taskProgress = `${index + 1} / ${trainingTasks.length}`;
-  const progressPercent = Math.round(((index + 1) / trainingTasks.length) * 100);
-
-  if (!started) {
-    return (
-      <div className="min-h-screen bg-gray-100 p-6 flex items-center justify-center">
-        <div className="max-w-3xl w-full bg-white rounded-2xl shadow border p-8">
-          <h1 className="text-3xl font-bold text-green-700 mb-4">
-            Training Instructions
-          </h1>
-
-          <p className="text-gray-700 mb-6">
-            This training module collects your normal typing and mouse behavior.
-            The system will use this data as your baseline during exam verification.
-          </p>
-
-          <div className="bg-gray-50 border rounded-xl p-5 mb-6">
-            <h2 className="text-xl font-bold mb-3">Please follow these rules</h2>
-            <ul className="space-y-3 text-gray-700">
-              <li>• Use the same laptop and keyboard that you will use during the exam.</li>
-              <li>• Type naturally. Do not type too fast or too slow.</li>
-              <li>• Use the mouse normally while answering the tasks.</li>
-              <li>• Do not skip file or drag tasks.</li>
-              <li>• Try to stay focused and complete the tasks without interruption.</li>
-            </ul>
-          </div>
-
-          <div className="bg-green-50 border rounded-xl p-5 mb-6">
-            <h3 className="font-bold mb-2">Training Includes</h3>
-            <ul className="space-y-2 text-gray-700">
-              <li>• 10 MCQ tasks</li>
-              <li>• 10 sentence typing tasks</li>
-              <li>• 3 file upload tasks</li>
-              <li>• 2 drag interaction tasks</li>
-              <li>• Quality score validation</li>
-            </ul>
-          </div>
-
-          <button
-            onClick={handleStartTraining}
-            className="bg-green-600 text-white px-6 py-3 rounded-xl hover:bg-green-700"
-          >
-            Start Training
-          </button>
-        </div>
-      </div>
-    );
-  }
+  const progress = Math.min(Math.round((samples.length / TARGET_SAMPLES) * 100), 100);
 
   return (
-    <div
-      className="min-h-screen bg-gray-100 p-6"
-      onMouseMove={handleMouseMove}
-      onClick={handleClick}
-      onWheel={handleWheel}
-    >
-      {notice && (
-        <div className="fixed top-4 right-4 z-50 bg-green-600 text-white px-5 py-3 rounded-xl shadow-lg">
-          {notice}
-        </div>
-      )}
-
-      <div className="max-w-5xl mx-auto bg-white rounded-2xl shadow border p-6">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6 gap-3">
-          <div>
-            <h1 className="text-3xl font-bold text-green-700">Training Module</h1>
-            <p className="text-gray-600 mt-1">
-              Complete all tasks carefully to create a stable behavioral baseline.
-            </p>
-          </div>
-
-          <div className="bg-green-100 text-green-700 px-4 py-2 rounded-full font-semibold">
-            Task {taskProgress}
-          </div>
+    <div className="min-h-screen bg-slate-100 p-6">
+      <div className="max-w-7xl mx-auto space-y-6">
+        <div className="bg-white rounded-3xl shadow p-6">
+          <h1 className="text-3xl font-bold text-slate-900">Training Mode</h1>
+          <p className="text-slate-600 mt-2">
+            MCQ + Typing + Mouse + Drag + File interaction capture for strong baseline.
+          </p>
         </div>
 
-        <div className="mb-6">
-          <div className="flex justify-between text-sm text-gray-600 mb-2">
-            <span>Progress</span>
-            <span>{progressPercent}%</span>
-          </div>
-          <div className="w-full bg-gray-200 rounded-full h-3">
-            <div
-              className="bg-green-600 h-3 rounded-full"
-              style={{ width: `${progressPercent}%` }}
+        <div className="grid md:grid-cols-3 gap-5">
+          <Card title="Samples" value={`${samples.length}/${TARGET_SAMPLES}`} />
+          <Card title="Quality" value={`${qualityScore}%`} />
+          <Card title="Progress" value={`${progress}%`} />
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <section className="bg-white rounded-3xl p-6 shadow">
+            <h2 className="text-xl font-bold mb-4">1. MCQ Interaction Task</h2>
+            <div className="bg-slate-100 rounded-2xl p-4 mb-4 font-semibold">
+              {mcqQuestions[mcqIndex].q}
+            </div>
+
+            <div className="space-y-3">
+              {mcqQuestions[mcqIndex].options.map((opt, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => handleMcqSelect(opt)}
+                  className={`w-full text-left border rounded-2xl p-4 font-semibold ${
+                    selectedMcq === opt
+                      ? "bg-green-100 border-green-500 text-green-700"
+                      : "bg-white hover:bg-blue-50"
+                  }`}
+                >
+                  {opt}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="bg-white rounded-3xl p-6 shadow">
+            <h2 className="text-xl font-bold mb-4">2. Typing Task</h2>
+            <div className="bg-slate-100 rounded-2xl p-4 mb-4 text-lg">
+              {currentSentence}
+            </div>
+
+            <textarea
+              value={typedText}
+              onChange={(e) => setTypedText(e.target.value)}
+              className="w-full h-40 rounded-2xl border p-4 text-lg outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Type here naturally..."
             />
-          </div>
-        </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
-          <div className="bg-blue-50 border rounded-xl p-4">
-            <p className="text-sm text-gray-600">Current Quality Score</p>
-            <h2 className="text-2xl font-bold text-blue-700">{qualityScore}%</h2>
-          </div>
-          <div className="bg-purple-50 border rounded-xl p-4">
-            <p className="text-sm text-gray-600">Minimum Required</p>
-            <h2 className="text-2xl font-bold text-purple-700">60%</h2>
-          </div>
-        </div>
-
-        <div className="bg-gray-50 border rounded-xl p-5 mb-6">
-          <h2 className="text-xl font-bold mb-2">Current Task</h2>
-          <p className="text-gray-800">{currentTask.question}</p>
-        </div>
-
-        {errorMessage && (
-          <div className="mb-4 bg-red-100 text-red-700 border border-red-200 rounded-xl p-4">
-            {errorMessage}
-          </div>
-        )}
-
-        {currentTask.type === "mcq" && (
-          <div className="space-y-3 mb-6">
-            {currentTask.options.map((opt, i) => (
-              <button
-                key={i}
-                type="button"
-                onClick={() => {
-                  setSelectedOption(opt);
-                  setErrorMessage("");
-                }}
-                className={`block w-full text-left border rounded-xl p-4 transition ${
-                  selectedOption === opt
-                    ? "bg-green-100 border-green-500"
-                    : "bg-white hover:bg-gray-50"
-                }`}
-              >
-                {opt}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {currentTask.type === "sentence" && (
-          <textarea
-            className="w-full border rounded-xl p-4 h-36 mb-6 outline-none focus:ring-2 focus:ring-green-500"
-            value={textAnswer}
-            onChange={(e) => {
-              setTextAnswer(e.target.value);
-              setErrorMessage("");
-            }}
-            onKeyDown={handleKeyDown}
-            onKeyUp={handleKeyUp}
-            placeholder="Type here exactly as shown..."
-          />
-        )}
-
-        {currentTask.type === "file" && (
-          <div className="mb-6">
-            <input
-              type="file"
-              onChange={handleFileUpload}
-              className="w-full border rounded-xl p-4 bg-white"
-            />
-          </div>
-        )}
-
-        {currentTask.type === "drag" && (
-          <div className="mb-6">
-            <div
-              ref={dragContainerRef}
-              className="relative w-full h-80 border-2 border-dashed border-gray-400 rounded-xl bg-gray-50 overflow-hidden"
+            <button
+              onClick={generateSentence}
+              className="mt-4 bg-slate-700 text-white px-5 py-3 rounded-2xl font-bold"
             >
-              <div className="absolute right-6 bottom-6 w-36 h-24 bg-green-100 border-2 border-green-500 rounded-xl flex items-center justify-center text-green-700 font-semibold">
-                Drop Zone
-              </div>
+              Change Sentence
+            </button>
+          </section>
+        </div>
 
-              <div
-                onMouseDown={handleMouseDragStart}
-                className={`absolute w-24 h-24 rounded-xl flex items-center justify-center text-white font-bold cursor-grab select-none shadow-lg ${
-                  dragDone ? "bg-green-600" : "bg-blue-600"
-                }`}
-                style={{
-                  left: `${dragBoxPos.x}px`,
-                  top: `${dragBoxPos.y}px`
-                }}
-              >
-                {dragDone ? "Done" : "Drag"}
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <section className="bg-white rounded-3xl p-6 shadow">
+            <h2 className="text-xl font-bold mb-4">3. Drag Task</h2>
+            <p className="text-slate-600 mb-4">
+              Drag inside this box. Mouse drag pattern will be recorded.
+            </p>
+
+            <div
+              draggable
+              onDragStart={() => {
+                eventsRef.current.drags.push({
+                  type: "html_drag_start",
+                  time: now(),
+                });
+              }}
+              onDragEnd={() => {
+                eventsRef.current.drags.push({
+                  type: "html_drag_end",
+                  time: now(),
+                });
+                setDragDone(true);
+              }}
+              className="h-48 rounded-3xl border-2 border-dashed border-blue-400 bg-blue-50 flex items-center justify-center cursor-move select-none"
+            >
+              <div className="bg-blue-600 text-white px-6 py-4 rounded-2xl font-bold shadow">
+                Drag Me
               </div>
             </div>
 
-            <p className="text-sm text-gray-600 mt-3">
-              Drag the blue box into the green drop zone.
+            {dragDone && (
+              <p className="mt-4 text-green-600 font-bold">Drag captured successfully</p>
+            )}
+          </section>
+
+          <section className="bg-white rounded-3xl p-6 shadow">
+            <h2 className="text-xl font-bold mb-4">4. File Choose Task</h2>
+            <p className="text-slate-600 mb-4">
+              Choose any file. Only file metadata is recorded, file content is not uploaded.
             </p>
+
+            <input
+              type="file"
+              onChange={handleFileChoose}
+              className="w-full rounded-2xl border p-4 bg-slate-50"
+            />
+
+            {fileName && (
+              <p className="mt-4 text-green-700 font-bold">
+                Selected file: {fileName}
+              </p>
+            )}
+
+            <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-3">
+              <Small label="Keys" value={eventsRef.current.keys.length} />
+              <Small label="Mouse" value={eventsRef.current.mouse.length} />
+              <Small label="Clicks" value={eventsRef.current.clicks.length} />
+              <Small label="Drags" value={eventsRef.current.drags.length} />
+            </div>
+          </section>
+        </div>
+
+        <section className="bg-white rounded-3xl p-6 shadow">
+          <h2 className="text-xl font-bold mb-4">Save Current Training Sample</h2>
+
+          <div className="flex gap-4 flex-wrap">
+            <button
+              onClick={saveSample}
+              className="bg-blue-600 text-white px-6 py-3 rounded-2xl font-bold"
+            >
+              Save Sample
+            </button>
+
+            <button
+              onClick={saveTraining}
+              disabled={isSaving}
+              className="bg-green-600 text-white px-6 py-3 rounded-2xl font-bold disabled:opacity-60"
+            >
+              {isSaving ? "Saving..." : "Complete Training"}
+            </button>
+
+            <button
+              onClick={() => (window.location.href = "/user")}
+              className="bg-slate-800 text-white px-6 py-3 rounded-2xl font-bold"
+            >
+              Back to Dashboard
+            </button>
           </div>
-        )}
 
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-9 gap-3 mb-6">
-          <Metric title="Keys" value={keys.length} />
-          <Metric title="Mouse" value={mouse.length} />
-          <Metric title="Clicks" value={clicks.length} />
-          <Metric title="Scrolls" value={scrolls.length} />
-          <Metric title="Hold" value={holdTimes.length} />
-          <Metric title="Flight" value={flightTimes.length} />
-          <Metric title="Mouse Speed" value={mouseSpeeds.length} />
-          <Metric title="Files" value={fileEvents.length} />
-          <Metric title="Drags" value={dragEvents.length} />
-        </div>
-
-        <div className="flex flex-col sm:flex-row gap-3 justify-end">
-          <button
-            type="button"
-            onClick={handleRedoTask}
-            className="bg-gray-500 text-white px-6 py-3 rounded-xl hover:bg-gray-600"
-          >
-            Redo Task
-          </button>
-
-          <button
-            onClick={handleNext}
-            disabled={submitting}
-            className="bg-green-600 text-white px-6 py-3 rounded-xl hover:bg-green-700 disabled:opacity-60"
-          >
-            {index === trainingTasks.length - 1
-              ? submitting
-                ? "Saving..."
-                : "Finish Training"
-              : "Next"}
-          </button>
-        </div>
+          <p className="text-slate-500 mt-4">
+            Minimum 15 samples required. Best accuracy ku 20–30 samples collect pannunga.
+          </p>
+        </section>
       </div>
     </div>
   );
 }
 
-function Metric({ title, value }) {
+function Card({ title, value }) {
   return (
-    <div className="bg-gray-50 p-3 rounded-xl text-center border">
-      <p className="text-xs text-gray-500">{title}</p>
+    <div className="bg-white rounded-3xl p-5 shadow">
+      <p className="text-sm text-slate-500">{title}</p>
+      <h2 className="text-4xl font-bold mt-2">{value}</h2>
+    </div>
+  );
+}
+
+function Small({ label, value }) {
+  return (
+    <div className="bg-slate-100 rounded-2xl p-3 text-center">
+      <p className="text-xs text-slate-500">{label}</p>
       <p className="font-bold">{value}</p>
     </div>
   );
