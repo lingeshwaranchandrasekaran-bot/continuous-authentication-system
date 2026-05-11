@@ -39,7 +39,7 @@ function UserDashboard() {
         setHasBaseline(true);
         setStatusType("success");
         setStatusMessage(
-          "Training completed successfully. Your baseline typing and mouse behavior are already stored."
+          "Training completed successfully. Your baseline behavior is already stored."
         );
 
         const oldUser = JSON.parse(localStorage.getItem("user"));
@@ -47,12 +47,20 @@ function UserDashboard() {
           "user",
           JSON.stringify({ ...oldUser, hasBaseline: true })
         );
+        localStorage.setItem("hasBaseline", "true");
       } else {
         setHasBaseline(false);
         setStatusType("warning");
         setStatusMessage(
-          "Training not completed yet. Complete the training module first. Exam module is visible but locked until training is completed."
+          "Training not completed yet. Complete training first to unlock exam."
         );
+
+        const oldUser = JSON.parse(localStorage.getItem("user"));
+        localStorage.setItem(
+          "user",
+          JSON.stringify({ ...oldUser, hasBaseline: false })
+        );
+        localStorage.setItem("hasBaseline", "false");
       }
     } catch (error) {
       setHasBaseline(false);
@@ -65,6 +73,7 @@ function UserDashboard() {
 
   const handleLogout = async () => {
     localStorage.removeItem("user");
+    localStorage.removeItem("hasBaseline");
 
     try {
       await fetch("http://localhost:5000/api/desktop/clear-user", {
@@ -81,7 +90,7 @@ function UserDashboard() {
 
   const handleStartExam = () => {
     if (!hasBaseline) {
-      alert("Please complete training first. Exam is locked until baseline is created.");
+      alert("Please complete training first.");
       return;
     }
 
@@ -118,7 +127,9 @@ function UserDashboard() {
       <div className="max-w-6xl mx-auto">
         <div className="bg-white rounded-3xl shadow border p-6 mb-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
-            <h1 className="text-4xl font-bold text-blue-700">User Dashboard</h1>
+            <h1 className="text-4xl font-bold text-blue-700">
+              User Dashboard
+            </h1>
             <p className="text-slate-600 mt-2">
               Welcome, <span className="font-semibold">{user.username}</span>
             </p>
@@ -139,62 +150,69 @@ function UserDashboard() {
           <h2 className="text-2xl font-bold mb-3">Training Status</h2>
           <p className="text-slate-700 mb-4">{statusMessage}</p>
 
-          <span className={`inline-block px-5 py-2 rounded-full text-sm font-bold ${statusBadgeClass}`}>
+          <span
+            className={`inline-block px-5 py-2 rounded-full text-sm font-bold ${statusBadgeClass}`}
+          >
             {hasBaseline ? "Baseline Available" : "Baseline Not Available"}
           </span>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-white rounded-3xl shadow border p-6 border-l-4 border-green-500">
-            <h2 className="text-3xl font-bold text-green-700 mb-3">
-              Training Module
-            </h2>
+        <div
+          className={`grid grid-cols-1 ${
+            hasBaseline ? "lg:grid-cols-1" : "lg:grid-cols-2"
+          } gap-6`}
+        >
+          {!hasBaseline && (
+            <div className="bg-white rounded-3xl shadow border p-6 border-l-4 border-green-500">
+              <h2 className="text-3xl font-bold text-green-700 mb-3">
+                Training Module
+              </h2>
 
-            <p className="text-slate-700 mb-4">
-              This module collects your typing rhythm, key hold time, mouse movement,
-              clicks, scrolls, and behavior pattern to create your personal baseline.
-            </p>
+              <p className="text-slate-700 mb-4">
+                This module collects your typing rhythm, key hold time, mouse
+                movement, clicks, scrolls, drag behavior, MCQ behavior, and file
+                selection pattern to create your personal baseline.
+              </p>
 
-            <div className="bg-slate-50 border rounded-2xl p-4 mb-5">
-              <h3 className="font-bold mb-2">Training Instructions</h3>
-              <ul className="space-y-2 text-slate-700">
-                <li>• Type naturally without copying text.</li>
-                <li>• Complete 20–30 good samples.</li>
-                <li>• Use mouse movement, clicks, scroll, and drag normally.</li>
-                <li>• After training completion, logout and login again.</li>
-              </ul>
+              <div className="bg-slate-50 border rounded-2xl p-4 mb-5">
+                <h3 className="font-bold mb-2">Training Instructions</h3>
+                <ul className="space-y-2 text-slate-700">
+                  <li>• Complete 10 MCQ tasks.</li>
+                  <li>• Complete 10 sentence typing tasks.</li>
+                  <li>• Complete 5 file selection tasks.</li>
+                  <li>• Complete drag task naturally.</li>
+                </ul>
+              </div>
+
+              <button
+                onClick={handleStartTraining}
+                className="px-6 py-3 rounded-2xl text-white font-bold bg-green-700 hover:bg-green-800"
+              >
+                Start Training
+              </button>
             </div>
+          )}
 
-            <button
-              onClick={handleStartTraining}
-              className={`px-6 py-3 rounded-2xl text-white font-bold ${
-                hasBaseline
-                  ? "bg-green-500 hover:bg-green-600"
-                  : "bg-green-700 hover:bg-green-800"
-              }`}
-            >
-              {hasBaseline ? "Retrain / Improve Baseline" : "Start Training"}
-            </button>
-          </div>
-
-          <div className={`bg-white rounded-3xl shadow border p-6 border-l-4 ${
-            hasBaseline ? "border-blue-500" : "border-gray-400"
-          }`}>
+          <div
+            className={`bg-white rounded-3xl shadow border p-6 border-l-4 ${
+              hasBaseline ? "border-blue-500" : "border-gray-400"
+            }`}
+          >
             <h2 className="text-3xl font-bold text-blue-700 mb-3">
               Exam Module
             </h2>
 
             <p className="text-slate-700 mb-4">
-              Exam module is visible for all users, but exam writing is allowed
-              only after completing training and creating a behavioral baseline.
+              Exam module is allowed only after completing training and creating
+              a behavioral baseline.
             </p>
 
             <div className="bg-slate-50 border rounded-2xl p-4 mb-5">
               <h3 className="font-bold mb-2">Exam Instructions</h3>
               <ul className="space-y-2 text-slate-700">
                 <li>• MCQ and typing tasks will be monitored.</li>
-                <li>• Tab switch and copy-paste are treated as suspicious.</li>
-                <li>• Your live behavior is compared with stored baseline.</li>
+                <li>• Tab switch and copy-paste are suspicious.</li>
+                <li>• Live behavior is compared with stored baseline.</li>
                 <li>• Alerts and reports are sent to admin dashboard.</li>
               </ul>
             </div>
@@ -219,9 +237,20 @@ function UserDashboard() {
           </div>
         </div>
 
+        {hasBaseline && (
+          <div className="mt-6 bg-green-50 border border-green-200 text-green-800 rounded-3xl p-5 font-semibold">
+            ✅ Training completed. Training module is hidden. It will appear
+            again only after admin resets your training baseline.
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
           <InfoCard title="User" value={user.username} color="text-blue-700" />
-          <InfoCard title="Current Role" value={user.role} color="text-purple-700" />
+          <InfoCard
+            title="Current Role"
+            value={user.role}
+            color="text-purple-700"
+          />
           <InfoCard
             title="Baseline Status"
             value={hasBaseline ? "Completed" : "Pending"}

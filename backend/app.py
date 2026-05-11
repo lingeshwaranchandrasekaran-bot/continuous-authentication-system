@@ -30,6 +30,7 @@ try:
 
     try:
         db.users.create_index("username")
+        db.users.create_index("hasBaseline")
         db.training.create_index("userId")
         db.analysis.create_index([("userId", 1), ("createdAt", -1)])
         db.alerts.create_index([("userId", 1), ("createdAt", -1)])
@@ -718,20 +719,33 @@ def register():
     if role not in ["user", "admin"]:
         role = "user"
 
-    if db.users.find_one({"username": username}):
+    if db.users.find_one({"username": {"$regex": f"^{username}$", "$options": "i"}}):
         return jsonify({"error": "User already exists"}), 409
 
     hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+    # Admin does not need training. Normal user starts with no baseline.
+    initial_has_baseline = True if role == "admin" else False
 
     db.users.insert_one({
         "username": username,
         "password": hashed,
         "role": role,
         "isBlocked": False,
+        "hasBaseline": initial_has_baseline,
         "createdAt": now_utc()
     })
 
-    return jsonify({"message": "User created successfully"})
+    return jsonify({
+        "message": "User created successfully",
+        "user": {
+            "username": username,
+            "role": role,
+            "hasBaseline": initial_has_baseline,
+            "requiresTraining": False if role == "admin" else True,
+            "redirectPath": "/admin" if role == "admin" else "/user"
+        }
+    })
 
 
 @app.route("/api/auth/login", methods=["POST"])
@@ -766,12 +780,9 @@ def login():
             if isinstance(stored_password, str)
             else stored_password
         )
-
-        password_ok = bcrypt.checkpw(
-            password.encode("utf-8"),
-            stored_bytes
-        )
+        password_ok = bcrypt.checkpw(password.encode("utf-8"), stored_bytes)
     except Exception:
+        # Fallback only for old plain-text demo users.
         password_ok = stored_password == password
 
     if not password_ok:
@@ -780,13 +791,29 @@ def login():
     real_username = user.get("username", username)
     role = user.get("role", "user")
 
-    has_baseline = db.training.find_one({
-        "userId": {"$regex": f"^{real_username}$", "$options": "i"}
-    }) is not None
+    # Admin must never be forced to training.
+    if role == "admin":
+        has_baseline = True
+        requires_training = False
+        redirect_path = "/admin"
+    else:
+        baseline_exists = db.training.find_one({
+            "userId": {"$regex": f"^{real_username}$", "$options": "i"}
+        }) is not None
+
+        has_baseline = baseline_exists
+        requires_training = not baseline_exists
+        redirect_path = "/user" if baseline_exists else "/training"
+
+    db.users.update_one(
+        {"username": {"$regex": f"^{real_username}$", "$options": "i"}},
+        {"$set": {"hasBaseline": has_baseline, "lastLoginAt": now_utc()}}
+    )
 
     db.login_logs.insert_one({
         "username": real_username,
         "role": role,
+        "hasBaseline": has_baseline,
         "loginAt": now_utc()
     })
 
@@ -795,7 +822,9 @@ def login():
         "user": {
             "username": real_username,
             "role": role,
-            "hasBaseline": has_baseline
+            "hasBaseline": has_baseline,
+            "requiresTraining": requires_training,
+            "redirectPath": redirect_path
         }
     })
 
@@ -870,10 +899,57 @@ def reset_training(username):
     if not ok:
         return resp, code
 
-    user_filter = {"userId": {"$regex": f"^{username}$", "$options": "i"}}
+    user = db.users.find_one({
+        "username": {"$regex": f"^{username}$", "$options": "i"}
+    })
+
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    real_username = user.get("username", username)
+    role = user.get("role", "user")
+
+    # Admin training reset is not needed.
+    if role == "admin":
+        db.users.update_one(
+            {"username": {"$regex": f"^{real_username}$", "$options": "i"}},
+            {"$set": {"hasBaseline": True}}
+        )
+        return jsonify({
+            "message": "Admin does not require training reset",
+            "hasBaseline": True
+        })
+
+    user_filter = {"userId": {"$regex": f"^{real_username}$", "$options": "i"}}
+
     db.training.delete_many(user_filter)
     db.user_decision_state.delete_many(user_filter)
-    return jsonify({"message": "Training reset successful"})
+
+    db.users.update_one(
+        {"username": {"$regex": f"^{real_username}$", "$options": "i"}},
+        {
+            "$set": {
+                "hasBaseline": False,
+                "trainingResetAt": now_utc()
+            },
+            "$unset": {
+                "trainingCompletedAt": ""
+            }
+        }
+    )
+
+    save_alert(
+        real_username,
+        "TRAINING_RESET",
+        f"Admin reset training baseline for {real_username}",
+        0
+    )
+
+    return jsonify({
+        "message": "Training reset successful",
+        "hasBaseline": False,
+        "requiresTraining": True
+    })
 
 
 @app.route("/api/admin/reset-warnings/<username>", methods=["POST"])
@@ -926,6 +1002,20 @@ def save_training():
             "updatedAt": now_utc()
         },
         upsert=True
+    )
+
+    # Sync user table so website + desktop app know training is completed.
+    db.users.update_one(
+        {"username": {"$regex": f"^{user_id}$", "$options": "i"}},
+        {
+            "$set": {
+                "hasBaseline": True,
+                "trainingCompletedAt": now_utc()
+            },
+            "$unset": {
+                "trainingResetAt": ""
+            }
+        }
     )
 
     db.user_decision_state.update_one(
@@ -1257,7 +1347,28 @@ def generate_user_report_pdf(username):
         download_name=f"{username}_full_report.pdf",
         mimetype="application/pdf"
     )
+@app.route("/api/auth/session/<username>", methods=["GET"])
+def get_user_session(username):
+    ok, resp, code = db_required()
+    if not ok:
+        return resp, code
 
+    user = db.users.find_one({
+        "username": {"$regex": f"^{username}$", "$options": "i"}
+    })
+
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    baseline_exists = db.training.find_one({
+        "userId": {"$regex": f"^{username}$", "$options": "i"}
+    }) is not None
+
+    return jsonify({
+        "username": user["username"],
+        "role": user.get("role", "user"),
+        "hasBaseline": baseline_exists
+    })
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)

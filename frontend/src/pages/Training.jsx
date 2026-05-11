@@ -1,71 +1,65 @@
 import React, { useEffect, useRef, useState } from "react";
 
 const API = "http://localhost:5000";
-const TARGET_SAMPLES = 30;
-
-const defaultEvents = () => ({
-  keys: [],
-  mouse: [],
-  clicks: [],
-  scrolls: [],
-  drags: [],
-  files: [],
-  focusEvents: [],
-  pasteEvents: [],
-  tabSwitches: [],
-  holdTimes: [],
-  flightTimes: [],
-  mouseSpeeds: [],
-  mcqAnswers: [],
-});
 
 const mcqQuestions = [
-  {
-    q: "Which database is used in this project?",
-    options: ["MySQL", "MongoDB", "Oracle", "SQLite"],
-  },
-  {
-    q: "Which model compares user behavior patterns?",
-    options: ["Siamese Neural Network", "KNN", "Naive Bayes", "SVM"],
-  },
-  {
-    q: "Hold time means?",
-    options: ["Mouse speed", "Key press duration", "Tab switch", "File upload"],
-  },
-  {
-    q: "Which activity is suspicious in exam?",
-    options: ["Copy Paste", "Tab Switch", "Window Blur", "All of the above"],
-  },
-  {
-    q: "Continuous authentication works after?",
-    options: ["Login", "Shutdown", "Formatting", "Uninstalling"],
-  },
+  { q: "Which database is used in this project?", options: ["MongoDB", "MySQL", "Oracle", "SQLite"] },
+  { q: "Which model compares user behavior?", options: ["Siamese Neural Network", "KNN", "Naive Bayes", "Decision Tree"] },
+  { q: "Hold time means?", options: ["Key press duration", "Mouse speed", "Tab switch", "Scroll time"] },
+  { q: "Flight time means?", options: ["Time between two key presses", "File upload time", "Mouse click", "Page load"] },
+  { q: "Which data is used for behavior biometrics?", options: ["Keystroke + Mouse", "Only password", "Only OTP", "Only email"] },
+  { q: "Suspicious exam action?", options: ["Copy paste", "Tab switch", "Window blur", "All of the above"] },
+  { q: "Backend framework used?", options: ["Flask", "Django", "Spring", "Laravel"] },
+  { q: "Frontend framework used?", options: ["React", "Angular", "Vue", "Next.js", "Laravel"] },
+  { q: "Training data is stored in?", options: ["MongoDB", "Excel", "PDF", "Notepad"] },
+  { q: "Continuous authentication checks user?", options: ["After login also", "Only before login", "Only signup", "Never"] },
 ];
 
 const sentences = [
-  "Continuous authentication improves security using typing rhythm and mouse behavior.",
-  "User monitoring detects suspicious activity during online examination sessions.",
-  "Hold time and flight time are important keystroke dynamics features.",
-  "MongoDB stores user baseline, alerts, reports, and login activity logs.",
-  "Repeated abnormal behavior can result in automatic user logout.",
+  "The quick brown fox jumps over the lazy dog and checks every keyboard pattern.",
+  "Continuous authentication monitors typing rhythm mouse movement and click behavior.",
+  "A secure system should verify the user even after the normal login process.",
+  "Keystroke dynamics uses hold time flight time typing speed and correction pattern.",
+  "Mouse behavior includes movement speed clicks scrolling dragging and idle activity.",
+  "MongoDB stores users training baseline alerts reports login logs and behavior sessions.",
+  "Siamese neural network compares current user behavior with the stored baseline.",
+  "Online exam fraud detection can identify tab switch copy paste and abnormal typing.",
+  "Admin dashboard shows user activity risk score suspicious alerts and PDF reports.",
+  "This project improves security by detecting unauthorized users during active sessions.",
 ];
+
+const defaultEvents = () => ({
+  keyEvents: [],
+  mouseEvents: [],
+  clickEvents: [],
+  scrollEvents: [],
+  dragEvents: [],
+  fileEvents: [],
+  focusEvents: [],
+  pasteEvents: [],
+  holdTimes: [],
+  flightTimes: [],
+  mouseSpeeds: [],
+});
 
 function Training() {
   const [user, setUser] = useState(null);
-  const [samples, setSamples] = useState([]);
+  const [step, setStep] = useState("mcq");
+
+  const [mcqDone, setMcqDone] = useState(0);
+  const [sentenceDone, setSentenceDone] = useState(0);
+  const [fileDone, setFileDone] = useState(0);
+  const [dragDone, setDragDone] = useState(0);
+
   const [typedText, setTypedText] = useState("");
-  const [currentSentence, setCurrentSentence] = useState(sentences[0]);
-  const [mcqIndex, setMcqIndex] = useState(0);
-  const [selectedMcq, setSelectedMcq] = useState("");
-  const [qualityScore, setQualityScore] = useState(0);
-  const [isSaving, setIsSaving] = useState(false);
-  const [dragDone, setDragDone] = useState(false);
-  const [fileName, setFileName] = useState("");
+  const [samples, setSamples] = useState([]);
+  const [saving, setSaving] = useState(false);
 
   const eventsRef = useRef(defaultEvents());
   const lastKeyDownRef = useRef({});
   const lastKeyTimeRef = useRef(null);
   const lastMouseRef = useRef(null);
+  const lastMouseSaveRef = useRef(0);
   const dragStartRef = useRef(null);
 
   useEffect(() => {
@@ -79,274 +73,363 @@ function Training() {
 
     setUser(savedUser);
 
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    window.addEventListener("blur", handleWindowBlur);
-    window.addEventListener("paste", handlePaste);
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("keyup", handleKeyUp);
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mousedown", handleMouseDown);
-    window.addEventListener("mouseup", handleMouseUp);
-    window.addEventListener("click", handleClick);
-    window.addEventListener("wheel", handleScroll);
+    const onVisibility = () => {
+      if (document.hidden) {
+        eventsRef.current.focusEvents.push({
+          type: "tab_switch",
+          time: Date.now(),
+        });
+      }
+    };
+
+    const onBlur = () => {
+      eventsRef.current.focusEvents.push({
+        type: "window_blur",
+        time: Date.now(),
+      });
+    };
+
+    const onPaste = () => {
+      eventsRef.current.pasteEvents.push({
+        type: "paste",
+        time: Date.now(),
+      });
+    };
+
+    const onKeyDown = (e) => {
+      const t = Date.now();
+
+      eventsRef.current.keyEvents.push({
+        type: "keydown",
+        code: e.code,
+        keyLength: e.key.length,
+        time: t,
+      });
+
+      if (lastKeyTimeRef.current) {
+        const flight = t - lastKeyTimeRef.current;
+        if (flight > 0 && flight < 3000) {
+          eventsRef.current.flightTimes.push(flight);
+        }
+      }
+
+      lastKeyDownRef.current[e.code] = t;
+      lastKeyTimeRef.current = t;
+    };
+
+    const onKeyUp = (e) => {
+      const t = Date.now();
+
+      eventsRef.current.keyEvents.push({
+        type: "keyup",
+        code: e.code,
+        keyLength: e.key.length,
+        time: t,
+      });
+
+      const downTime = lastKeyDownRef.current[e.code];
+      if (downTime) {
+        const hold = t - downTime;
+        if (hold > 0 && hold < 3000) {
+          eventsRef.current.holdTimes.push(hold);
+        }
+      }
+    };
+
+    const onMouseMove = (e) => {
+      const t = Date.now();
+
+      if (t - lastMouseSaveRef.current < 70) return;
+      lastMouseSaveRef.current = t;
+
+      eventsRef.current.mouseEvents.push({
+        type: "mousemove",
+        x: e.clientX,
+        y: e.clientY,
+        time: t,
+      });
+
+      if (lastMouseRef.current) {
+        const dx = e.clientX - lastMouseRef.current.x;
+        const dy = e.clientY - lastMouseRef.current.y;
+        const dt = t - lastMouseRef.current.time;
+
+        if (dt > 0) {
+          eventsRef.current.mouseSpeeds.push(Math.sqrt(dx * dx + dy * dy) / dt);
+        }
+      }
+
+      lastMouseRef.current = {
+        x: e.clientX,
+        y: e.clientY,
+        time: t,
+      };
+    };
+
+    const onClick = (e) => {
+      eventsRef.current.clickEvents.push({
+        type: "click",
+        x: e.clientX,
+        y: e.clientY,
+        button: e.button,
+        time: Date.now(),
+      });
+    };
+
+    const onWheel = (e) => {
+      eventsRef.current.scrollEvents.push({
+        type: "scroll",
+        deltaY: e.deltaY,
+        time: Date.now(),
+      });
+    };
+
+    const onMouseDown = (e) => {
+      dragStartRef.current = {
+        x: e.clientX,
+        y: e.clientY,
+        time: Date.now(),
+      };
+    };
+
+    const onMouseUp = (e) => {
+      if (!dragStartRef.current) return;
+
+      const dx = Math.abs(e.clientX - dragStartRef.current.x);
+      const dy = Math.abs(e.clientY - dragStartRef.current.y);
+
+      if (dx > 15 || dy > 15) {
+        eventsRef.current.dragEvents.push({
+          type: "drag",
+          startX: dragStartRef.current.x,
+          startY: dragStartRef.current.y,
+          endX: e.clientX,
+          endY: e.clientY,
+          startTime: dragStartRef.current.time,
+          endTime: Date.now(),
+        });
+      }
+
+      dragStartRef.current = null;
+    };
+
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("blur", onBlur);
+    window.addEventListener("paste", onPaste);
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("click", onClick);
+    window.addEventListener("wheel", onWheel);
+    window.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("mouseup", onMouseUp);
 
     return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-      window.removeEventListener("blur", handleWindowBlur);
-      window.removeEventListener("paste", handlePaste);
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("keyup", handleKeyUp);
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mousedown", handleMouseDown);
-      window.removeEventListener("mouseup", handleMouseUp);
-      window.removeEventListener("click", handleClick);
-      window.removeEventListener("wheel", handleScroll);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("blur", onBlur);
+      window.removeEventListener("paste", onPaste);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("click", onClick);
+      window.removeEventListener("wheel", onWheel);
+      window.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("mouseup", onMouseUp);
     };
   }, []);
 
-  useEffect(() => {
-    calculateQuality();
-  }, [samples]);
-
-  const now = () => Date.now();
-
-  const handleVisibilityChange = () => {
-    if (document.hidden) {
-      eventsRef.current.tabSwitches.push({
-        type: "tab_switch",
-        time: now(),
-      });
-    }
+  const mean = (arr) => {
+    if (!arr.length) return 0;
+    return arr.reduce((a, b) => a + b, 0) / arr.length;
   };
 
-  const handleWindowBlur = () => {
-    eventsRef.current.focusEvents.push({
-      type: "window_blur",
-      time: now(),
-    });
+  const std = (arr) => {
+    if (!arr.length) return 0;
+    const m = mean(arr);
+    return Math.sqrt(mean(arr.map((x) => Math.pow(x - m, 2))));
   };
 
-  const handlePaste = () => {
-    eventsRef.current.pasteEvents.push({
-      type: "paste",
-      time: now(),
-    });
+  const buildFeatureVector = () => {
+    const e = eventsRef.current;
+
+    return [
+      mean(e.holdTimes),
+      std(e.holdTimes),
+      mean(e.flightTimes),
+      std(e.flightTimes),
+      mean(e.mouseSpeeds),
+      std(e.mouseSpeeds),
+      e.keyEvents.length,
+      e.clickEvents.length,
+      e.mouseEvents.length,
+      e.scrollEvents.length,
+      e.dragEvents.length,
+      e.fileEvents.length,
+      e.pasteEvents.length,
+      e.focusEvents.length,
+    ];
   };
 
-  const handleKeyDown = (e) => {
-    const t = now();
+  const buildFeatureObject = () => {
+    const e = eventsRef.current;
 
-    eventsRef.current.keys.push({
-      key: e.key,
-      type: "down",
-      time: t,
-    });
-
-    if (lastKeyTimeRef.current) {
-      const flight = t - lastKeyTimeRef.current;
-      if (flight > 0 && flight < 2000) {
-        eventsRef.current.flightTimes.push(flight);
-      }
-    }
-
-    lastKeyDownRef.current[e.key] = t;
-    lastKeyTimeRef.current = t;
-  };
-
-  const handleKeyUp = (e) => {
-    const t = now();
-
-    eventsRef.current.keys.push({
-      key: e.key,
-      type: "up",
-      time: t,
-    });
-
-    const downTime = lastKeyDownRef.current[e.key];
-    if (downTime) {
-      const hold = t - downTime;
-      if (hold > 0 && hold < 3000) {
-        eventsRef.current.holdTimes.push(hold);
-      }
-    }
-  };
-
-  const handleMouseMove = (e) => {
-    const t = now();
-
-    eventsRef.current.mouse.push({
-      type: "move",
-      x: e.clientX,
-      y: e.clientY,
-      time: t,
-    });
-
-    if (lastMouseRef.current) {
-      const dx = e.clientX - lastMouseRef.current.x;
-      const dy = e.clientY - lastMouseRef.current.y;
-      const dt = t - lastMouseRef.current.time;
-
-      if (dt > 0) {
-        const speed = Math.sqrt(dx * dx + dy * dy) / dt;
-        eventsRef.current.mouseSpeeds.push(speed);
-      }
-    }
-
-    lastMouseRef.current = {
-      x: e.clientX,
-      y: e.clientY,
-      time: t,
+    return {
+      mean_hold: mean(e.holdTimes),
+      std_hold: std(e.holdTimes),
+      mean_flight: mean(e.flightTimes),
+      std_flight: std(e.flightTimes),
+      mean_mouse_speed: mean(e.mouseSpeeds),
+      std_mouse_speed: std(e.mouseSpeeds),
+      total_keys: e.keyEvents.length,
+      total_clicks: e.clickEvents.length,
+      total_mouse_moves: e.mouseEvents.length,
+      total_scrolls: e.scrollEvents.length,
+      total_drags: e.dragEvents.length,
+      total_files: e.fileEvents.length,
+      total_paste: e.pasteEvents.length,
+      total_focus_events: e.focusEvents.length,
     };
   };
 
-  const handleMouseDown = (e) => {
-    dragStartRef.current = {
-      x: e.clientX,
-      y: e.clientY,
-      time: now(),
-    };
-  };
-
-  const handleMouseUp = (e) => {
-    if (!dragStartRef.current) return;
-
-    const dx = Math.abs(e.clientX - dragStartRef.current.x);
-    const dy = Math.abs(e.clientY - dragStartRef.current.y);
-
-    if (dx > 20 || dy > 20) {
-      eventsRef.current.drags.push({
-        type: "drag",
-        startX: dragStartRef.current.x,
-        startY: dragStartRef.current.y,
-        endX: e.clientX,
-        endY: e.clientY,
-        startTime: dragStartRef.current.time,
-        endTime: now(),
-      });
-    }
-
-    dragStartRef.current = null;
-  };
-
-  const handleClick = (e) => {
-    eventsRef.current.clicks.push({
-      type: "click",
-      x: e.clientX,
-      y: e.clientY,
-      button: e.button,
-      time: now(),
-    });
-  };
-
-  const handleScroll = (e) => {
-    eventsRef.current.scrolls.push({
-      type: "scroll",
-      deltaY: e.deltaY,
-      time: now(),
-    });
-  };
-
-  const handleMcqSelect = (option) => {
-    setSelectedMcq(option);
-
-    eventsRef.current.mcqAnswers.push({
-      question: mcqQuestions[mcqIndex].q,
-      selected: option,
-      time: now(),
-    });
-
-    setTimeout(() => {
-      setMcqIndex((prev) => (prev + 1) % mcqQuestions.length);
-      setSelectedMcq("");
-    }, 400);
-  };
-
-  const handleFileChoose = (e) => {
-    const file = e.target.files?.[0];
-
-    if (!file) return;
-
-    setFileName(file.name);
-
-    eventsRef.current.files.push({
-      name: file.name,
-      size: file.size,
-      type: file.type,
-      time: now(),
-    });
-  };
-
-  const generateSentence = () => {
-    const random = sentences[Math.floor(Math.random() * sentences.length)];
-    setCurrentSentence(random);
-    setTypedText("");
-  };
-
-  const calculateQuality = () => {
-    const sampleCountScore = Math.min((samples.length / TARGET_SAMPLES) * 40, 40);
-
-    const totalKeys = samples.reduce((a, s) => a + (s.keys?.length || 0), 0);
-    const totalMouse = samples.reduce((a, s) => a + (s.mouse?.length || 0), 0);
-    const totalClicks = samples.reduce((a, s) => a + (s.clicks?.length || 0), 0);
-    const totalDrags = samples.reduce((a, s) => a + (s.drags?.length || 0), 0);
-    const totalFiles = samples.reduce((a, s) => a + (s.files?.length || 0), 0);
-    const totalMcq = samples.reduce((a, s) => a + (s.mcqAnswers?.length || 0), 0);
-    const totalHold = samples.reduce((a, s) => a + (s.holdTimes?.length || 0), 0);
-
-    let behaviorScore = 0;
-
-    if (totalKeys > 200) behaviorScore += 12;
-    if (totalMouse > 150) behaviorScore += 12;
-    if (totalClicks > 30) behaviorScore += 8;
-    if (totalHold > 50) behaviorScore += 12;
-    if (totalDrags > 3) behaviorScore += 8;
-    if (totalFiles > 0) behaviorScore += 4;
-    if (totalMcq > 5) behaviorScore += 4;
-
-    setQualityScore(Math.min(Math.round(sampleCountScore + behaviorScore), 100));
-  };
-
-  const saveSample = () => {
-    if (typedText.trim().length < 15) {
-      alert("Please type the sentence properly before saving sample");
-      return;
-    }
-
-    if (eventsRef.current.mcqAnswers.length < 1) {
-      alert("Please answer at least one MCQ before saving sample");
-      return;
-    }
-
-    const current = {
-      ...eventsRef.current,
-      typedLength: typedText.length,
-      createdAt: now(),
-    };
-
-    setSamples((prev) => [...prev, current]);
-
+  const resetCapture = () => {
     eventsRef.current = defaultEvents();
     lastKeyDownRef.current = {};
     lastKeyTimeRef.current = null;
     lastMouseRef.current = null;
     dragStartRef.current = null;
+  };
+
+  const saveSample = (extra = {}) => {
+    const sample = {
+      ...extra,
+      featureVector: buildFeatureVector(),
+      features: buildFeatureObject(),
+      rawEvents: eventsRef.current,
+      createdAt: new Date().toISOString(),
+    };
+
+    setSamples((prev) => [...prev, sample]);
+    resetCapture();
+  };
+
+  const handleMcqAnswer = (option) => {
+    const question = mcqQuestions[mcqDone];
+
+    saveSample({
+      taskType: "mcq",
+      questionNo: mcqDone + 1,
+      question: question.q,
+      selectedAnswer: option,
+    });
+
+    const next = mcqDone + 1;
+    setMcqDone(next);
+
+    if (next >= 10) {
+      setStep("sentence");
+    }
+  };
+
+  const handleSentenceNext = () => {
+    const expected = sentences[sentenceDone];
+
+    if (typedText.trim().length < 20) {
+      alert("Please type the sentence properly");
+      return;
+    }
+
+    saveSample({
+      taskType: "sentence",
+      sentenceNo: sentenceDone + 1,
+      expectedTextLength: expected.length,
+      typedLength: typedText.length,
+    });
 
     setTypedText("");
-    setSelectedMcq("");
-    setDragDone(false);
-    setFileName("");
-    generateSentence();
+
+    const next = sentenceDone + 1;
+    setSentenceDone(next);
+
+    if (next >= 10) {
+      setStep("file");
+    }
   };
+
+  const handleFileChoose = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    eventsRef.current.fileEvents.push({
+      type: "file_select",
+      fileNo: fileDone + 1,
+      fileNameLength: file.name.length,
+      fileSize: file.size,
+      fileType: file.type,
+      time: Date.now(),
+    });
+
+    saveSample({
+      taskType: "file",
+      fileNo: fileDone + 1,
+      fileName: file.name,
+      fileSize: file.size,
+      fileType: file.type,
+    });
+
+    const next = fileDone + 1;
+    setFileDone(next);
+
+    if (next >= 5) {
+      setStep("drag");
+    }
+
+    e.target.value = "";
+  };
+
+  const handleDragTaskDone = () => {
+    if (dragDone < 5) {
+      alert("Please drag the box at least 5 times.");
+      return;
+    }
+
+    saveSample({
+      taskType: "drag",
+      dragCount: dragDone,
+    });
+
+    setStep("complete");
+  };
+
+  const handleHtmlDragStart = () => {
+    eventsRef.current.dragEvents.push({
+      type: "html_drag_start",
+      time: Date.now(),
+    });
+  };
+
+  const handleHtmlDragEnd = () => {
+    eventsRef.current.dragEvents.push({
+      type: "html_drag_end",
+      time: Date.now(),
+    });
+
+    setDragDone((prev) => prev + 1);
+  };
+
+  const qualityScore = Math.min(
+    mcqDone * 2 + sentenceDone * 3 + fileDone * 4 + dragDone * 3,
+    100
+  );
 
   const saveTraining = async () => {
     if (!user) return;
 
-    if (samples.length < 15) {
-      alert("Need minimum 15 good samples");
+    if (mcqDone < 10 || sentenceDone < 10 || fileDone < 5 || dragDone < 5) {
+      alert("Complete full training first.");
       return;
     }
 
-    setIsSaving(true);
+    setSaving(true);
 
     try {
       const res = await fetch(`${API}/api/training/save-baseline`, {
@@ -357,7 +440,15 @@ function Training() {
         body: JSON.stringify({
           userId: user.username,
           samples,
+          totalSamples: samples.length,
           qualityScore,
+          trainingFlow: {
+            mcq: mcqDone,
+            sentences: sentenceDone,
+            files: fileDone,
+            drags: dragDone,
+          },
+          savedAt: new Date().toISOString(),
         }),
       });
 
@@ -365,182 +456,167 @@ function Training() {
 
       if (!res.ok) {
         alert(data.error || "Training save failed");
-        setIsSaving(false);
+        setSaving(false);
         return;
       }
 
-      alert("Training completed successfully. Please login again.");
+      localStorage.setItem("hasBaseline", "true");
+      const oldUser = JSON.parse(localStorage.getItem("user"));
+      localStorage.setItem(
+        "user",
+        JSON.stringify({ ...oldUser, hasBaseline: true })
+      );
 
-      localStorage.removeItem("user");
-      localStorage.removeItem("userId");
-      localStorage.removeItem("role");
-      localStorage.removeItem("hasBaseline");
-
-      window.location.href = "/";
+      alert("Training completed successfully ✅");
+      window.location.href = "/dashboard";
     } catch (error) {
       alert("Backend connection failed");
     }
 
-    setIsSaving(false);
+    setSaving(false);
   };
-
-  const progress = Math.min(Math.round((samples.length / TARGET_SAMPLES) * 100), 100);
 
   return (
     <div className="min-h-screen bg-slate-100 p-6">
-      <div className="max-w-7xl mx-auto space-y-6">
+      <div className="max-w-5xl mx-auto space-y-6">
         <div className="bg-white rounded-3xl shadow p-6">
-          <h1 className="text-3xl font-bold text-slate-900">Training Mode</h1>
+          <h1 className="text-3xl font-bold text-slate-900">
+            Training Mode
+          </h1>
           <p className="text-slate-600 mt-2">
-            MCQ + Typing + Mouse + Drag + File interaction capture for strong baseline.
+            Complete all tasks naturally to create your secure behavior baseline.
           </p>
         </div>
 
-        <div className="grid md:grid-cols-3 gap-5">
-          <Card title="Samples" value={`${samples.length}/${TARGET_SAMPLES}`} />
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          <Card title="MCQ" value={`${mcqDone}/10`} />
+          <Card title="Sentences" value={`${sentenceDone}/10`} />
+          <Card title="Files" value={`${fileDone}/5`} />
+          <Card title="Drags" value={`${dragDone}/5`} />
           <Card title="Quality" value={`${qualityScore}%`} />
-          <Card title="Progress" value={`${progress}%`} />
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-          <section className="bg-white rounded-3xl p-6 shadow">
-            <h2 className="text-xl font-bold mb-4">1. MCQ Interaction Task</h2>
-            <div className="bg-slate-100 rounded-2xl p-4 mb-4 font-semibold">
-              {mcqQuestions[mcqIndex].q}
+        {step === "mcq" && (
+          <section className="bg-white rounded-3xl shadow p-6">
+            <h2 className="text-2xl font-bold text-blue-700 mb-4">
+              Step 1: MCQ Task {mcqDone + 1}/10
+            </h2>
+
+            <div className="bg-slate-100 rounded-2xl p-5 mb-5 text-lg font-semibold">
+              {mcqQuestions[mcqDone].q}
             </div>
 
-            <div className="space-y-3">
-              {mcqQuestions[mcqIndex].options.map((opt, i) => (
+            <div className="grid md:grid-cols-2 gap-4">
+              {mcqQuestions[mcqDone].options.map((opt, i) => (
                 <button
                   key={i}
-                  type="button"
-                  onClick={() => handleMcqSelect(opt)}
-                  className={`w-full text-left border rounded-2xl p-4 font-semibold ${
-                    selectedMcq === opt
-                      ? "bg-green-100 border-green-500 text-green-700"
-                      : "bg-white hover:bg-blue-50"
-                  }`}
+                  onClick={() => handleMcqAnswer(opt)}
+                  className="border rounded-2xl p-4 text-left font-semibold hover:bg-blue-50 hover:border-blue-500"
                 >
                   {opt}
                 </button>
               ))}
             </div>
           </section>
+        )}
 
-          <section className="bg-white rounded-3xl p-6 shadow">
-            <h2 className="text-xl font-bold mb-4">2. Typing Task</h2>
-            <div className="bg-slate-100 rounded-2xl p-4 mb-4 text-lg">
-              {currentSentence}
+        {step === "sentence" && (
+          <section className="bg-white rounded-3xl shadow p-6">
+            <h2 className="text-2xl font-bold text-green-700 mb-4">
+              Step 2: Typing Task {sentenceDone + 1}/10
+            </h2>
+
+            <div className="bg-slate-100 rounded-2xl p-5 mb-5 text-lg">
+              {sentences[sentenceDone]}
             </div>
 
             <textarea
               value={typedText}
               onChange={(e) => setTypedText(e.target.value)}
-              className="w-full h-40 rounded-2xl border p-4 text-lg outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="Type here naturally..."
+              className="w-full h-40 rounded-2xl border p-4 text-lg outline-none focus:ring-2 focus:ring-green-500"
+              placeholder="Type the above sentence here..."
             />
 
             <button
-              onClick={generateSentence}
-              className="mt-4 bg-slate-700 text-white px-5 py-3 rounded-2xl font-bold"
+              onClick={handleSentenceNext}
+              className="mt-5 bg-green-600 text-white px-6 py-3 rounded-2xl font-bold"
             >
-              Change Sentence
+              Save Sentence & Next
             </button>
           </section>
-        </div>
+        )}
 
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-          <section className="bg-white rounded-3xl p-6 shadow">
-            <h2 className="text-xl font-bold mb-4">3. Drag Task</h2>
-            <p className="text-slate-600 mb-4">
-              Drag inside this box. Mouse drag pattern will be recorded.
-            </p>
+        {step === "file" && (
+          <section className="bg-white rounded-3xl shadow p-6">
+            <h2 className="text-2xl font-bold text-purple-700 mb-4">
+              Step 3: File Upload Task {fileDone + 1}/5
+            </h2>
 
-            <div
-              draggable
-              onDragStart={() => {
-                eventsRef.current.drags.push({
-                  type: "html_drag_start",
-                  time: now(),
-                });
-              }}
-              onDragEnd={() => {
-                eventsRef.current.drags.push({
-                  type: "html_drag_end",
-                  time: now(),
-                });
-                setDragDone(true);
-              }}
-              className="h-48 rounded-3xl border-2 border-dashed border-blue-400 bg-blue-50 flex items-center justify-center cursor-move select-none"
-            >
-              <div className="bg-blue-600 text-white px-6 py-4 rounded-2xl font-bold shadow">
-                Drag Me
-              </div>
-            </div>
-
-            {dragDone && (
-              <p className="mt-4 text-green-600 font-bold">Drag captured successfully</p>
-            )}
-          </section>
-
-          <section className="bg-white rounded-3xl p-6 shadow">
-            <h2 className="text-xl font-bold mb-4">4. File Choose Task</h2>
-            <p className="text-slate-600 mb-4">
-              Choose any file. Only file metadata is recorded, file content is not uploaded.
+            <p className="text-slate-600 mb-5">
+              Select any 5 files. Only file metadata is used for training behavior.
             </p>
 
             <input
               type="file"
               onChange={handleFileChoose}
-              className="w-full rounded-2xl border p-4 bg-slate-50"
+              className="w-full rounded-2xl border p-5 bg-slate-50"
             />
-
-            {fileName && (
-              <p className="mt-4 text-green-700 font-bold">
-                Selected file: {fileName}
-              </p>
-            )}
-
-            <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-3">
-              <Small label="Keys" value={eventsRef.current.keys.length} />
-              <Small label="Mouse" value={eventsRef.current.mouse.length} />
-              <Small label="Clicks" value={eventsRef.current.clicks.length} />
-              <Small label="Drags" value={eventsRef.current.drags.length} />
-            </div>
           </section>
-        </div>
+        )}
 
-        <section className="bg-white rounded-3xl p-6 shadow">
-          <h2 className="text-xl font-bold mb-4">Save Current Training Sample</h2>
+        {step === "drag" && (
+          <section className="bg-white rounded-3xl shadow p-6">
+            <h2 className="text-2xl font-bold text-orange-700 mb-4">
+              Step 4: Drag Task
+            </h2>
 
-          <div className="flex gap-4 flex-wrap">
+            <p className="text-slate-600 mb-5">
+              Drag the box at least 5 times inside the area.
+            </p>
+
+            <div className="h-72 rounded-3xl border-2 border-dashed border-orange-400 bg-orange-50 flex items-center justify-center select-none">
+              <div
+                draggable
+                onDragStart={handleHtmlDragStart}
+                onDragEnd={handleHtmlDragEnd}
+                className="bg-blue-600 text-white px-8 py-5 rounded-2xl font-bold shadow cursor-move"
+              >
+                Drag Me
+              </div>
+            </div>
+
+            <p className="mt-4 font-bold text-slate-700">
+              Drag Count: {dragDone}/5
+            </p>
+
             <button
-              onClick={saveSample}
-              className="bg-blue-600 text-white px-6 py-3 rounded-2xl font-bold"
+              onClick={handleDragTaskDone}
+              className="mt-5 bg-orange-600 text-white px-6 py-3 rounded-2xl font-bold"
             >
-              Save Sample
+              Complete Drag Task
             </button>
+          </section>
+        )}
+
+        {step === "complete" && (
+          <section className="bg-white rounded-3xl shadow p-6">
+            <h2 className="text-2xl font-bold text-green-700 mb-4">
+              Training Ready to Save
+            </h2>
+
+            <p className="text-slate-600 mb-5">
+              All training tasks completed. Save baseline to MongoDB.
+            </p>
 
             <button
               onClick={saveTraining}
-              disabled={isSaving}
+              disabled={saving}
               className="bg-green-600 text-white px-6 py-3 rounded-2xl font-bold disabled:opacity-60"
             >
-              {isSaving ? "Saving..." : "Complete Training"}
+              {saving ? "Saving..." : "Complete Training"}
             </button>
-
-            <button
-              onClick={() => (window.location.href = "/user")}
-              className="bg-slate-800 text-white px-6 py-3 rounded-2xl font-bold"
-            >
-              Back to Dashboard
-            </button>
-          </div>
-
-          <p className="text-slate-500 mt-4">
-            Minimum 15 samples required. Best accuracy ku 20–30 samples collect pannunga.
-          </p>
-        </section>
+          </section>
+        )}
       </div>
     </div>
   );
@@ -550,16 +626,7 @@ function Card({ title, value }) {
   return (
     <div className="bg-white rounded-3xl p-5 shadow">
       <p className="text-sm text-slate-500">{title}</p>
-      <h2 className="text-4xl font-bold mt-2">{value}</h2>
-    </div>
-  );
-}
-
-function Small({ label, value }) {
-  return (
-    <div className="bg-slate-100 rounded-2xl p-3 text-center">
-      <p className="text-xs text-slate-500">{label}</p>
-      <p className="font-bold">{value}</p>
+      <h2 className="text-2xl font-bold mt-2">{value}</h2>
     </div>
   );
 }

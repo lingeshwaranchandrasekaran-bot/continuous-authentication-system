@@ -3,6 +3,7 @@ import requests
 import tkinter as tk
 from tkinter import messagebox
 import webbrowser
+from urllib.parse import quote
 
 API_BASE = "http://127.0.0.1:5000"
 
@@ -41,11 +42,14 @@ def stop_desktop_agent():
 
 
 def set_desktop_user(username, role):
-    requests.post(
-        SET_USER_URL,
-        json={"userId": username, "role": role},
-        timeout=5
-    )
+    try:
+        requests.post(
+            SET_USER_URL,
+            json={"userId": username, "role": role},
+            timeout=5
+        )
+    except Exception:
+        pass
 
 
 def clear_desktop_user():
@@ -58,6 +62,20 @@ def clear_desktop_user():
 def clear_inputs():
     username_entry.delete(0, tk.END)
     password_entry.delete(0, tk.END)
+
+
+def open_browser_session(path_after_login="dashboard"):
+    if not logged_user:
+        return
+
+    username = quote(logged_user.get("username", ""))
+    role = quote(logged_user.get("role", "user").lower())
+    has_baseline = "true" if logged_user.get("hasBaseline", False) else "false"
+
+    webbrowser.open(
+        f"http://localhost:3000/desktop-session"
+        f"?username={username}&role={role}&hasBaseline={has_baseline}&next={path_after_login}"
+    )
 
 
 def show_login_screen():
@@ -124,19 +142,32 @@ def login_user():
             return
 
         user = data.get("user", {})
-        role = user.get("role", "user")
-        has_baseline = user.get("hasBaseline", False)
 
-        set_desktop_user(username, role)
+        real_username = user.get("username", username)
+        role = user.get("role", "user").lower()
+        has_baseline = bool(user.get("hasBaseline", False))
 
         logged_user = {
-            "username": username,
+            "username": real_username,
             "role": role,
             "hasBaseline": has_baseline
         }
 
+        set_desktop_user(real_username, role)
+
+        if role == "admin":
+            messagebox.showinfo(
+                "Admin Login",
+                "Admin login successful. Opening Admin Dashboard."
+            )
+            open_browser_session("admin")
+            root.attributes("-topmost", False)
+            root.iconify()
+            login_button.config(text="Login Securely", state="normal")
+            return
+
         start_desktop_agent()
-        show_mode_screen(username, role, has_baseline)
+        show_mode_screen(real_username, role, has_baseline)
 
     except Exception as e:
         messagebox.showerror(
@@ -151,10 +182,23 @@ def open_training_mode():
     if not logged_user:
         return
 
-    webbrowser.open("http://localhost:3000/training")
+    role = logged_user.get("role", "user").lower()
+
+    if role == "admin":
+        open_browser_session("admin")
+        return
+
+    if logged_user.get("hasBaseline", False):
+        messagebox.showinfo(
+            "Training Already Completed",
+            "Training already completed.\n\nAdmin reset pannina mattum again training open aagum."
+        )
+        return
+
+    open_browser_session("training")
     messagebox.showinfo(
         "Training Mode",
-        "Training page opened.\nComplete 20–30 good samples for better accuracy."
+        "Training page opened.\nComplete training to unlock Exam and Monitor Mode."
     )
 
 
@@ -162,15 +206,21 @@ def open_exam_mode():
     if not logged_user:
         return
 
+    role = logged_user.get("role", "user").lower()
+
+    if role == "admin":
+        open_browser_session("admin")
+        return
+
     if not logged_user.get("hasBaseline", False):
         messagebox.showwarning(
             "Training Required",
             "Please complete training before Exam Mode."
         )
-        webbrowser.open("http://localhost:3000/training")
+        open_browser_session("training")
         return
 
-    webbrowser.open("http://localhost:3000/exam")
+    open_browser_session("exam")
     messagebox.showinfo(
         "Exam Mode",
         "Exam mode opened.\nBrowser and desktop monitoring are active."
@@ -181,19 +231,25 @@ def start_monitor_mode():
     if not logged_user:
         return
 
+    role = logged_user.get("role", "user").lower()
+
+    if role == "admin":
+        open_browser_session("admin")
+        return
+
     if not logged_user.get("hasBaseline", False):
         messagebox.showwarning(
             "Training Required",
             "Please complete training before Monitor Mode."
         )
-        webbrowser.open("http://localhost:3000/training")
+        open_browser_session("training")
         return
 
     start_desktop_agent()
 
     messagebox.showinfo(
         "Monitor Mode",
-        "Desktop monitoring is active.\n\nThis app will minimize to taskbar.\nOpen it again to Logout, Exam, or Dashboard."
+        "Desktop monitoring is active.\n\nThis app will minimize to taskbar."
     )
 
     root.attributes("-topmost", False)
@@ -204,12 +260,12 @@ def open_dashboard():
     if not logged_user:
         return
 
-    role = logged_user.get("role", "user")
+    role = logged_user.get("role", "user").lower()
 
     if role == "admin":
-        webbrowser.open("http://localhost:3000/admin")
+        open_browser_session("admin")
     else:
-        webbrowser.open("http://localhost:3000/user")
+        open_browser_session("user")
 
     messagebox.showinfo("Dashboard", "Dashboard opened in browser.")
 
@@ -217,6 +273,13 @@ def open_dashboard():
 def return_to_mode_screen():
     if not logged_user:
         show_login_screen()
+        return
+
+    role = logged_user.get("role", "user").lower()
+
+    if role == "admin":
+        open_browser_session("admin")
+        root.iconify()
         return
 
     show_mode_screen(
@@ -261,7 +324,12 @@ def on_enter_key(event):
 
 
 def create_button(parent, title, desc, color, command):
-    card = tk.Frame(parent, bg="#ffffff", highlightbackground="#e2e8f0", highlightthickness=1)
+    card = tk.Frame(
+        parent,
+        bg="#ffffff",
+        highlightbackground="#e2e8f0",
+        highlightthickness=1
+    )
     card.pack(fill="x", pady=8)
 
     inner = tk.Frame(card, bg="#ffffff", padx=18, pady=14)
@@ -341,7 +409,7 @@ tk.Label(
 
 tk.Label(
     login_left,
-    text="✓ Training Mode\n✓ Exam Mode\n✓ Monitor Mode\n✓ Admin Dashboard\n✓ 5-Warning Auto Lock",
+    text="✓ Training Mode\n✓ Exam Mode\n✓ Monitor Mode\n✓ Admin Dashboard\n✓ Warning Based Auto Lock",
     font=("Segoe UI", 13),
     bg="#020617",
     fg="#38bdf8",
@@ -462,7 +530,14 @@ logout_top_btn.pack(side="right")
 body = tk.Frame(mode_frame, bg="#f1f5f9", padx=45, pady=35)
 body.pack(fill="both", expand=True)
 
-profile_card = tk.Frame(body, bg="#ffffff", padx=25, pady=22, highlightbackground="#e2e8f0", highlightthickness=1)
+profile_card = tk.Frame(
+    body,
+    bg="#ffffff",
+    padx=25,
+    pady=22,
+    highlightbackground="#e2e8f0",
+    highlightthickness=1
+)
 profile_card.pack(fill="x", pady=(0, 25))
 
 profile_left = tk.Frame(profile_card, bg="#ffffff")
@@ -511,7 +586,14 @@ content_grid.pack(fill="both", expand=True)
 left_panel = tk.Frame(content_grid, bg="#f1f5f9")
 left_panel.pack(side="left", fill="both", expand=True, padx=(0, 20))
 
-right_panel = tk.Frame(content_grid, bg="#ffffff", padx=25, pady=22, highlightbackground="#e2e8f0", highlightthickness=1)
+right_panel = tk.Frame(
+    content_grid,
+    bg="#ffffff",
+    padx=25,
+    pady=22,
+    highlightbackground="#e2e8f0",
+    highlightthickness=1
+)
 right_panel.pack(side="right", fill="y")
 
 tk.Label(
@@ -525,7 +607,7 @@ tk.Label(
 create_button(
     left_panel,
     "Training Mode",
-    "Collect keystroke, mouse, click and scroll baseline samples.",
+    "Only for new users or users reset by admin.",
     "#16a34a",
     open_training_mode
 )
@@ -563,10 +645,10 @@ tk.Label(
 ).pack(anchor="w")
 
 instructions = [
-    "1. First-time user must complete Training Mode.",
-    "2. Use Monitor Mode for normal desktop work.",
-    "3. Open this app from taskbar to switch mode.",
-    "4. Use Exam Mode only after training is complete.",
+    "1. Admin login goes directly to Admin Dashboard.",
+    "2. New user must complete Training Mode.",
+    "3. Trained user can directly use Exam or Monitor Mode.",
+    "4. If admin resets training, user must train again.",
     "5. Logout before another person uses the system."
 ]
 

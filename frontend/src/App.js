@@ -6,17 +6,19 @@ import AdminDashboard from "./pages/AdminDashboard";
 import UserDashboard from "./pages/UserDashboard";
 import Training from "./pages/Training";
 import Exam from "./pages/Exam";
+import DesktopSession from "./pages/DesktopSession";
 
 const ProtectedRoute = ({ children, roleRequired }) => {
-  const user = localStorage.getItem("userId");
+  const userData = localStorage.getItem("user");
+  const userId = localStorage.getItem("userId");
   const role = localStorage.getItem("role");
 
-  if (!user) {
-    return <Navigate to="/" />;
+  if (!userData && !userId) {
+    return <Navigate to="/" replace />;
   }
 
   if (roleRequired && role !== roleRequired) {
-    return <Navigate to="/" />;
+    return <Navigate to="/" replace />;
   }
 
   return children;
@@ -27,6 +29,8 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Login />} />
+
+        <Route path="/desktop-session" element={<DesktopSession />} />
 
         <Route
           path="/admin"
@@ -40,7 +44,7 @@ function App() {
         <Route
           path="/user"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute roleRequired="user">
               <UserDashboard />
             </ProtectedRoute>
           }
@@ -49,7 +53,7 @@ function App() {
         <Route
           path="/training"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute roleRequired="user">
               <Training />
             </ProtectedRoute>
           }
@@ -58,13 +62,13 @@ function App() {
         <Route
           path="/exam"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute roleRequired="user">
               <Exam />
             </ProtectedRoute>
           }
         />
 
-        <Route path="*" element={<Navigate to="/" />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
   );
