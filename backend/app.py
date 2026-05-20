@@ -4,6 +4,8 @@ from pymongo import MongoClient
 from datetime import datetime, timezone
 from io import BytesIO
 import os
+import base64
+from pathlib import Path
 import numpy as np
 import bcrypt
 import torch
@@ -21,6 +23,8 @@ FEATURE_SIZE = 12
 client = None
 db = None
 current_desktop_user = {"userId": "unknown", "role": "user"}
+EVIDENCE_DIR = Path("evidence_screenshots")
+EVIDENCE_DIR.mkdir(exist_ok=True)
 
 try:
     client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=3000)
@@ -30,7 +34,6 @@ try:
 
     try:
         db.users.create_index("username")
-        db.users.create_index("hasBaseline")
         db.training.create_index("userId")
         db.analysis.create_index([("userId", 1), ("createdAt", -1)])
         db.alerts.create_index([("userId", 1), ("createdAt", -1)])
@@ -38,6 +41,7 @@ try:
         db.login_logs.create_index([("username", 1), ("loginAt", -1)])
         db.behavior_sessions.create_index([("userId", 1), ("createdAt", -1)])
         db.user_decision_state.create_index("userId")
+        db.evidence.create_index([("userId", 1), ("createdAt", -1)])
         print("✅ MongoDB indexes ready")
     except Exception as index_error:
         print("⚠️ Index creation error:", index_error)
@@ -116,6 +120,17 @@ def save_alert(user_id, alert_type, message, risk_score=0):
         "status": "unread",
         "createdAt": now_utc()
     })
+
+
+def threat_level_from_risk(risk):
+    risk = int(risk or 0)
+    if risk >= 80:
+        return "CRITICAL"
+    if risk >= 60:
+        return "HIGH"
+    if risk >= 35:
+        return "MEDIUM"
+    return "LOW"
 
 
 class SiameseNetwork(nn.Module):
@@ -599,6 +614,60 @@ def desktop_alert():
     return jsonify({"message": "Desktop alert saved"})
 
 
+
+
+@app.route("/api/desktop/evidence", methods=["POST"])
+def save_desktop_evidence():
+    ok, resp, code = db_required()
+    if not ok:
+        return resp, code
+
+    data = request.json or {}
+    user_id = data.get("userId")
+    screenshot_base64 = data.get("screenshotBase64")
+
+    if not user_id:
+        return jsonify({"error": "userId required"}), 400
+
+    if not screenshot_base64:
+        return jsonify({"error": "screenshotBase64 required"}), 400
+
+    risk_score = int(data.get("riskScore", 0))
+    reason = data.get("reason", "Suspicious behavior evidence")
+    threat = threat_level_from_risk(risk_score)
+
+    filename = f"{user_id}_{int(datetime.now().timestamp())}.jpg"
+    file_path = EVIDENCE_DIR / filename
+
+    try:
+        image_bytes = base64.b64decode(screenshot_base64)
+        file_path.write_bytes(image_bytes)
+    except Exception as e:
+        return jsonify({"error": f"Screenshot save failed: {str(e)}"}), 500
+
+    db.evidence.insert_one({
+        "userId": user_id,
+        "reason": reason,
+        "riskScore": risk_score,
+        "threatLevel": threat,
+        "screenshotPath": str(file_path),
+        "createdAt": now_utc()
+    })
+
+    save_alert(
+        user_id,
+        "SCREENSHOT_EVIDENCE",
+        f"{threat} evidence captured: {reason}",
+        risk_score
+    )
+
+    return jsonify({
+        "message": "Evidence saved",
+        "threatLevel": threat,
+        "filename": filename
+    })
+
+
 @app.route("/api/desktop/evaluate", methods=["POST"])
 def desktop_evaluate():
     ok, resp, code = db_required()
@@ -724,28 +793,16 @@ def register():
 
     hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
-    # Admin does not need training. Normal user starts with no baseline.
-    initial_has_baseline = True if role == "admin" else False
-
     db.users.insert_one({
         "username": username,
         "password": hashed,
         "role": role,
         "isBlocked": False,
-        "hasBaseline": initial_has_baseline,
+        "hasBaseline": False,
         "createdAt": now_utc()
     })
 
-    return jsonify({
-        "message": "User created successfully",
-        "user": {
-            "username": username,
-            "role": role,
-            "hasBaseline": initial_has_baseline,
-            "requiresTraining": False if role == "admin" else True,
-            "redirectPath": "/admin" if role == "admin" else "/user"
-        }
-    })
+    return jsonify({"message": "User created successfully"})
 
 
 @app.route("/api/auth/login", methods=["POST"])
@@ -782,38 +839,26 @@ def login():
         )
         password_ok = bcrypt.checkpw(password.encode("utf-8"), stored_bytes)
     except Exception:
-        # Fallback only for old plain-text demo users.
         password_ok = stored_password == password
 
     if not password_ok:
         return jsonify({"error": "Invalid username or password"}), 401
 
     real_username = user.get("username", username)
-    role = user.get("role", "user")
+    role = user.get("role", "user").lower()
 
-    # Admin must never be forced to training.
-    if role == "admin":
-        has_baseline = True
-        requires_training = False
-        redirect_path = "/admin"
-    else:
-        baseline_exists = db.training.find_one({
-            "userId": {"$regex": f"^{real_username}$", "$options": "i"}
-        }) is not None
-
-        has_baseline = baseline_exists
-        requires_training = not baseline_exists
-        redirect_path = "/user" if baseline_exists else "/training"
+    baseline_exists = db.training.find_one({
+        "userId": {"$regex": f"^{real_username}$", "$options": "i"}
+    }) is not None
 
     db.users.update_one(
         {"username": {"$regex": f"^{real_username}$", "$options": "i"}},
-        {"$set": {"hasBaseline": has_baseline, "lastLoginAt": now_utc()}}
+        {"$set": {"hasBaseline": baseline_exists}}
     )
 
     db.login_logs.insert_one({
         "username": real_username,
         "role": role,
-        "hasBaseline": has_baseline,
         "loginAt": now_utc()
     })
 
@@ -822,9 +867,9 @@ def login():
         "user": {
             "username": real_username,
             "role": role,
-            "hasBaseline": has_baseline,
-            "requiresTraining": requires_training,
-            "redirectPath": redirect_path
+            "hasBaseline": baseline_exists,
+            "requiresTraining": False if role == "admin" else not baseline_exists,
+            "redirectPath": "/admin" if role == "admin" else "/user"
         }
     })
 
@@ -903,24 +948,11 @@ def reset_training(username):
         "username": {"$regex": f"^{username}$", "$options": "i"}
     })
 
-    if not user:
-        return jsonify({"error": "User not found"}), 404
+    real_username = user.get("username", username) if user else username
 
-    real_username = user.get("username", username)
-    role = user.get("role", "user")
-
-    # Admin training reset is not needed.
-    if role == "admin":
-        db.users.update_one(
-            {"username": {"$regex": f"^{real_username}$", "$options": "i"}},
-            {"$set": {"hasBaseline": True}}
-        )
-        return jsonify({
-            "message": "Admin does not require training reset",
-            "hasBaseline": True
-        })
-
-    user_filter = {"userId": {"$regex": f"^{real_username}$", "$options": "i"}}
+    user_filter = {
+        "userId": {"$regex": f"^{real_username}$", "$options": "i"}
+    }
 
     db.training.delete_many(user_filter)
     db.user_decision_state.delete_many(user_filter)
@@ -947,8 +979,7 @@ def reset_training(username):
 
     return jsonify({
         "message": "Training reset successful",
-        "hasBaseline": False,
-        "requiresTraining": True
+        "hasBaseline": False
     })
 
 
@@ -1004,7 +1035,6 @@ def save_training():
         upsert=True
     )
 
-    # Sync user table so website + desktop app know training is completed.
     db.users.update_one(
         {"username": {"$regex": f"^{user_id}$", "$options": "i"}},
         {
@@ -1180,22 +1210,107 @@ def save_exam():
     if not user_id:
         return jsonify({"error": "userId required"}), 400
 
+    total_questions = int(data.get("totalQuestions", 0))
+    correct_answers = int(data.get("correctAnswers", 0))
+    wrong_answers = int(data.get("wrongAnswers", 0))
+    unanswered = int(data.get("unanswered", 0))
     warnings = int(data.get("warnings", 0))
-    result = data.get("result", "UNKNOWN")
 
-    db.exam.insert_one({
+    score_percent = 0
+    if total_questions > 0:
+        score_percent = round((correct_answers / total_questions) * 100, 2)
+
+    if score_percent >= 80 and warnings <= 2:
+        result = "PASS"
+    elif score_percent >= 50:
+        result = "REVIEW"
+    else:
+        result = "FAIL"
+
+    if warnings >= 5:
+        result = "SUSPICIOUS"
+
+    exam_doc = {
         "userId": user_id,
-        "log": data.get("log", []),
+        "totalQuestions": total_questions,
+        "correctAnswers": correct_answers,
+        "wrongAnswers": wrong_answers,
+        "unanswered": unanswered,
+        "scorePercent": score_percent,
         "warnings": warnings,
         "result": result,
+        "answers": data.get("answers", []),
         "warningDetails": data.get("warningDetails", []),
+        "behaviorSummary": data.get("behaviorSummary", {}),
+        "startedAt": data.get("startedAt"),
+        "submittedAt": now_utc(),
         "createdAt": now_utc()
+    }
+
+    db.exam.insert_one(exam_doc)
+
+    if warnings > 0 or result in ["SUSPICIOUS", "FAIL"]:
+        save_alert(
+            user_id,
+            "EXAM_ALERT",
+            f"Exam result: {result}, Score: {score_percent}%, Warnings: {warnings}",
+            warnings
+        )
+
+    return jsonify({
+        "message": "Exam saved successfully",
+        "scorePercent": score_percent,
+        "result": result,
+        "correctAnswers": correct_answers,
+        "wrongAnswers": wrong_answers,
+        "unanswered": unanswered,
+        "warnings": warnings
     })
 
-    if warnings > 0 or result in ["SUSPICIOUS", "FRAUD", "FRAUD_AUTO_LOGOUT", "PATTERN_AUTO_LOGOUT"]:
-        save_alert(user_id, "EXAM_ALERT", f"Exam finished with {warnings} warnings. Result: {result}", warnings)
 
-    return jsonify({"message": "Exam report saved"})
+@app.route("/api/exam/results/<username>", methods=["GET"])
+def get_user_exam_results(username):
+    ok, resp, code = db_required()
+    if not ok:
+        return resp, code
+
+    results = list(
+        db.exam.find(
+            {"userId": {"$regex": f"^{username}$", "$options": "i"}},
+            {"_id": 0}
+        ).sort("createdAt", -1)
+    )
+
+    return jsonify(clean_docs(results))
+
+
+@app.route("/api/admin/exam-results", methods=["GET"])
+def admin_exam_results():
+    ok, resp, code = db_required()
+    if not ok:
+        return resp, code
+
+    username = request.args.get("username", "").strip()
+    result = request.args.get("result", "").strip()
+    date = request.args.get("date", "").strip()
+
+    query = {}
+
+    if username:
+        query["userId"] = {"$regex": username, "$options": "i"}
+
+    if result:
+        query["result"] = result
+
+    docs = list(db.exam.find(query, {"_id": 0}).sort("createdAt", -1))
+
+    if date:
+        docs = [
+            d for d in docs
+            if d.get("createdAt") and d.get("createdAt").date().isoformat() == date
+        ]
+
+    return jsonify(clean_docs(docs))
 
 
 @app.route("/api/admin/users", methods=["GET"])
@@ -1347,28 +1462,68 @@ def generate_user_report_pdf(username):
         download_name=f"{username}_full_report.pdf",
         mimetype="application/pdf"
     )
-@app.route("/api/auth/session/<username>", methods=["GET"])
-def get_user_session(username):
+
+
+
+
+@app.route("/api/admin/evidence", methods=["GET"])
+def get_all_evidence():
     ok, resp, code = db_required()
     if not ok:
         return resp, code
 
-    user = db.users.find_one({
-        "username": {"$regex": f"^{username}$", "$options": "i"}
-    })
+    docs = list(
+        db.evidence.find({}, {"_id": 0})
+        .sort("createdAt", -1)
+        .limit(100)
+    )
 
-    if not user:
-        return jsonify({"error": "User not found"}), 404
+    return jsonify(clean_docs(docs))
 
-    baseline_exists = db.training.find_one({
-        "userId": {"$regex": f"^{username}$", "$options": "i"}
-    }) is not None
+
+@app.route("/api/admin/evidence/<username>", methods=["GET"])
+def get_user_evidence(username):
+    ok, resp, code = db_required()
+    if not ok:
+        return resp, code
+
+    docs = list(
+        db.evidence.find(
+            {"userId": {"$regex": f"^{username}$", "$options": "i"}},
+            {"_id": 0}
+        )
+        .sort("createdAt", -1)
+        .limit(50)
+    )
+
+    return jsonify(clean_docs(docs))
+
+
+@app.route("/api/admin/threat-summary", methods=["GET"])
+def threat_summary():
+    ok, resp, code = db_required()
+    if not ok:
+        return resp, code
+
+    critical = db.evidence.count_documents({"threatLevel": "CRITICAL"})
+    high = db.evidence.count_documents({"threatLevel": "HIGH"})
+    medium = db.evidence.count_documents({"threatLevel": "MEDIUM"})
+    low = db.evidence.count_documents({"threatLevel": "LOW"})
+
+    recent_alerts = list(
+        db.alerts.find({}, {"_id": 0})
+        .sort("createdAt", -1)
+        .limit(10)
+    )
 
     return jsonify({
-        "username": user["username"],
-        "role": user.get("role", "user"),
-        "hasBaseline": baseline_exists
+        "critical": critical,
+        "high": high,
+        "medium": medium,
+        "low": low,
+        "recentAlerts": clean_docs(recent_alerts)
     })
+
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)

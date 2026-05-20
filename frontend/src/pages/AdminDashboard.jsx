@@ -20,6 +20,7 @@ const navItems = [
   { label: "Activity", value: "activity" },
   { label: "Alerts", value: "alerts" },
   { label: "Reports", value: "reports" },
+  { label: "Evidence", value: "evidence" },
   { label: "Login Logs", value: "logins" },
   { label: "Sentences", value: "sentences" },
 ];
@@ -32,6 +33,13 @@ const statusStyle = {
   BLOCKED: "bg-red-50 text-red-700 border-red-200",
   COMPLETED: "bg-blue-50 text-blue-700 border-blue-200",
   PENDING: "bg-yellow-50 text-yellow-700 border-yellow-200",
+  PASS: "bg-green-50 text-green-700 border-green-200",
+  REVIEW: "bg-orange-50 text-orange-700 border-orange-200",
+  FAIL: "bg-red-50 text-red-700 border-red-200",
+  LOW: "bg-green-50 text-green-700 border-green-200",
+  MEDIUM: "bg-orange-50 text-orange-700 border-orange-200",
+  HIGH: "bg-red-50 text-red-700 border-red-200",
+  CRITICAL: "bg-red-100 text-red-800 border-red-300",
 };
 
 const formatIST = (time) => {
@@ -46,6 +54,8 @@ const formatIST = (time) => {
     return "N/A";
   }
 };
+
+const safe = (value) => value ?? "N/A";
 
 function AdminDashboard() {
   const [activeTab, setActiveTab] = useState("dashboard");
@@ -68,6 +78,13 @@ function AdminDashboard() {
   const [analysis, setAnalysis] = useState([]);
   const [alerts, setAlerts] = useState([]);
   const [loginLogs, setLoginLogs] = useState([]);
+  const [evidence, setEvidence] = useState([]);
+  const [threatSummary, setThreatSummary] = useState({
+    critical: 0,
+    high: 0,
+    medium: 0,
+    low: 0,
+  });
 
   const [selectedUser, setSelectedUser] = useState(null);
   const [selectedUserData, setSelectedUserData] = useState(null);
@@ -81,19 +98,28 @@ function AdminDashboard() {
   const [alertFilter, setAlertFilter] = useState("ALL");
   const [reportDateFilter, setReportDateFilter] = useState("");
   const [reportUserFilter, setReportUserFilter] = useState("");
+  const [reportResultFilter, setReportResultFilter] = useState("");
+  const [evidenceUserFilter, setEvidenceUserFilter] = useState("");
+  const [evidenceLevelFilter, setEvidenceLevelFilter] = useState("");
 
   const loadAll = async () => {
     try {
       setLoading(true);
+
+      const requests = [
+        fetch(`${API}/api/admin/stats`),
+        fetch(`${API}/api/admin/users`),
+        fetch(`${API}/api/admin/reports`),
+        fetch(`${API}/api/admin/analysis`),
+        fetch(`${API}/api/admin/alerts`),
+        fetch(`${API}/api/admin/login-logs`),
+      ];
+
+      const evidenceReq = fetch(`${API}/api/admin/evidence`).catch(() => null);
+      const threatReq = fetch(`${API}/api/admin/threat-summary`).catch(() => null);
+
       const [statsRes, usersRes, reportsRes, analysisRes, alertsRes, loginLogsRes] =
-        await Promise.all([
-          fetch(`${API}/api/admin/stats`),
-          fetch(`${API}/api/admin/users`),
-          fetch(`${API}/api/admin/reports`),
-          fetch(`${API}/api/admin/analysis`),
-          fetch(`${API}/api/admin/alerts`),
-          fetch(`${API}/api/admin/login-logs`),
-        ]);
+        await Promise.all(requests);
 
       setStats(await statsRes.json());
       setUsers(await usersRes.json());
@@ -101,6 +127,16 @@ function AdminDashboard() {
       setAnalysis(await analysisRes.json());
       setAlerts(await alertsRes.json());
       setLoginLogs(await loginLogsRes.json());
+
+      const evidenceRes = await evidenceReq;
+      if (evidenceRes && evidenceRes.ok) {
+        setEvidence(await evidenceRes.json());
+      }
+
+      const threatRes = await threatReq;
+      if (threatRes && threatRes.ok) {
+        setThreatSummary(await threatRes.json());
+      }
     } catch (error) {
       console.error(error);
       alert("Failed to load admin dashboard data");
@@ -249,18 +285,36 @@ function AdminDashboard() {
       const matchDate =
         !reportDateFilter ||
         (r.createdAt && new Date(r.createdAt).toISOString().slice(0, 10) === reportDateFilter);
+
       const matchUser =
         !reportUserFilter ||
         r.userId?.toLowerCase().includes(reportUserFilter.toLowerCase());
-      return matchDate && matchUser;
+
+      const matchResult =
+        !reportResultFilter || r.result === reportResultFilter;
+
+      return matchDate && matchUser && matchResult;
     });
-  }, [reports, reportDateFilter, reportUserFilter]);
+  }, [reports, reportDateFilter, reportUserFilter, reportResultFilter]);
+
+  const filteredEvidence = useMemo(() => {
+    return evidence.filter((e) => {
+      const matchUser =
+        !evidenceUserFilter ||
+        e.userId?.toLowerCase().includes(evidenceUserFilter.toLowerCase());
+
+      const matchLevel =
+        !evidenceLevelFilter || e.threatLevel === evidenceLevelFilter;
+
+      return matchUser && matchLevel;
+    });
+  }, [evidence, evidenceUserFilter, evidenceLevelFilter]);
 
   const riskLevel = useMemo(() => {
-    if (stats.fraudCount > 0) return { label: "High Risk", color: "red" };
-    if (stats.suspiciousCount > 0) return { label: "Medium Risk", color: "orange" };
+    if ((threatSummary.critical || 0) > 0 || stats.fraudCount > 0) return { label: "High Risk", color: "red" };
+    if ((threatSummary.high || 0) > 0 || stats.suspiciousCount > 0) return { label: "Medium Risk", color: "orange" };
     return { label: "Normal", color: "green" };
-  }, [stats]);
+  }, [stats, threatSummary]);
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900">
@@ -345,7 +399,14 @@ function AdminDashboard() {
             </div>
 
             {activeTab === "dashboard" && (
-              <DashboardView stats={stats} alerts={alerts} analysis={analysis} reports={reports} />
+              <DashboardView
+                stats={stats}
+                alerts={alerts}
+                analysis={analysis}
+                reports={reports}
+                threatSummary={threatSummary}
+                evidence={evidence}
+              />
             )}
 
             {activeTab === "users" && (
@@ -384,6 +445,17 @@ function AdminDashboard() {
                 setReportDateFilter={setReportDateFilter}
                 reportUserFilter={reportUserFilter}
                 setReportUserFilter={setReportUserFilter}
+                reportResultFilter={reportResultFilter}
+                setReportResultFilter={setReportResultFilter}
+              />
+            )}
+            {activeTab === "evidence" && (
+              <EvidenceView
+                evidence={filteredEvidence}
+                evidenceUserFilter={evidenceUserFilter}
+                setEvidenceUserFilter={setEvidenceUserFilter}
+                evidenceLevelFilter={evidenceLevelFilter}
+                setEvidenceLevelFilter={setEvidenceLevelFilter}
               />
             )}
             {activeTab === "logins" && <LoginLogsView loginLogs={loginLogs} />}
@@ -414,7 +486,7 @@ function Header({ riskLevel, loading, loadAll }) {
           </h1>
           <p className="text-slate-500 mt-3 max-w-3xl text-base lg:text-lg">
             Professional dashboard for user behavior monitoring, anomaly detection,
-            training baselines, alerts, reports, and security governance.
+            training baselines, exam scores, evidence, alerts, reports, and security governance.
           </p>
         </div>
 
@@ -450,7 +522,7 @@ function Header({ riskLevel, loading, loadAll }) {
   );
 }
 
-function DashboardView({ stats, alerts, analysis, reports }) {
+function DashboardView({ stats, alerts, analysis, reports, threatSummary, evidence }) {
   const pieData = [
     { name: "Genuine", value: Number(stats.genuineCount || 0) },
     { name: "Suspicious", value: Number(stats.suspiciousCount || 0) },
@@ -464,13 +536,20 @@ function DashboardView({ stats, alerts, analysis, reports }) {
     { name: "Reports", value: Number(stats.totalReports || 0) },
   ];
 
+  const threatData = [
+    { name: "Critical", value: Number(threatSummary.critical || 0), fill: "#ef4444" },
+    { name: "High", value: Number(threatSummary.high || 0), fill: "#f97316" },
+    { name: "Medium", value: Number(threatSummary.medium || 0), fill: "#f59e0b" },
+    { name: "Low", value: Number(threatSummary.low || 0), fill: "#22c55e" },
+  ];
+
   return (
     <div className="space-y-7">
       <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-4 gap-5">
         <MetricCard title="Total Users" value={stats.totalUsers} sub="Registered accounts" tone="blue" />
         <MetricCard title="Behavior Sessions" value={stats.behaviorSessions} sub="Desktop + browser monitoring" tone="green" />
         <MetricCard title="Alerts" value={stats.totalAlerts} sub="Security events" tone="red" />
-        <MetricCard title="Blocked Users" value={stats.blockedUsers} sub="Restricted users" tone="orange" />
+        <MetricCard title="Evidence" value={evidence.length} sub="Screenshot proof records" tone="orange" />
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
@@ -509,6 +588,19 @@ function DashboardView({ stats, alerts, analysis, reports }) {
           </div>
         </Panel>
       </div>
+
+      <Panel title="Evidence Threat Levels">
+        <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+          {threatData.map((item) => (
+            <div key={item.name} className="rounded-3xl bg-slate-50 border border-slate-200 p-5">
+              <p className="text-sm text-slate-500">{item.name}</p>
+              <h3 className="text-4xl font-black mt-2" style={{ color: item.fill }}>
+                {item.value}
+              </h3>
+            </div>
+          ))}
+        </div>
+      </Panel>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
         <Panel title="Latest Security Alerts">
@@ -785,6 +877,7 @@ function AlertsView({ alerts, alertFilter, setAlertFilter }) {
           <option value="TRAINING_COMPLETED">Training Completed</option>
           <option value="TRAINING_RESET">Training Reset</option>
           <option value="EXAM_ALERT">Exam Alert</option>
+          <option value="SCREENSHOT_EVIDENCE">Screenshot Evidence</option>
           <option value="DESKTOP_WARNING">Desktop Warning</option>
           <option value="DESKTOP_AUTO_LOCK">Desktop Auto Lock</option>
           <option value="WARNING_RESET">Warning Reset</option>
@@ -795,23 +888,122 @@ function AlertsView({ alerts, alertFilter, setAlertFilter }) {
   );
 }
 
-function ReportsView({ reports, reportDateFilter, setReportDateFilter, reportUserFilter, setReportUserFilter }) {
+function ReportsView({
+  reports,
+  reportDateFilter,
+  setReportDateFilter,
+  reportUserFilter,
+  setReportUserFilter,
+  reportResultFilter,
+  setReportResultFilter,
+}) {
   return (
     <Panel title="Exam Reports">
-      <div className="flex flex-col md:flex-row justify-end gap-3 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-6">
         <Input placeholder="Filter username..." value={reportUserFilter} onChange={(e) => setReportUserFilter(e.target.value)} />
+        <select
+          className="rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
+          value={reportResultFilter}
+          onChange={(e) => setReportResultFilter(e.target.value)}
+        >
+          <option value="">All Results</option>
+          <option value="PASS">PASS</option>
+          <option value="REVIEW">REVIEW</option>
+          <option value="FAIL">FAIL</option>
+          <option value="SUSPICIOUS">SUSPICIOUS</option>
+        </select>
         <input
           type="date"
-          className="w-full md:max-w-xs rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
+          className="rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
           value={reportDateFilter}
           onChange={(e) => setReportDateFilter(e.target.value)}
         />
+        <button
+          onClick={() => {
+            setReportDateFilter("");
+            setReportUserFilter("");
+            setReportResultFilter("");
+          }}
+          className="rounded-2xl bg-slate-800 text-white font-bold px-4 py-3"
+        >
+          Clear Filters
+        </button>
       </div>
+
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         {reports.length === 0 && <Empty text="No reports found" />}
         {reports.map((r, i) => <ReportCard key={i} report={r} />)}
       </div>
     </Panel>
+  );
+}
+
+function EvidenceView({
+  evidence,
+  evidenceUserFilter,
+  setEvidenceUserFilter,
+  evidenceLevelFilter,
+  setEvidenceLevelFilter,
+}) {
+  return (
+    <Panel title="Screenshot Evidence">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
+        <Input
+          placeholder="Filter username..."
+          value={evidenceUserFilter}
+          onChange={(e) => setEvidenceUserFilter(e.target.value)}
+        />
+        <select
+          className="rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
+          value={evidenceLevelFilter}
+          onChange={(e) => setEvidenceLevelFilter(e.target.value)}
+        >
+          <option value="">All Threat Levels</option>
+          <option value="LOW">LOW</option>
+          <option value="MEDIUM">MEDIUM</option>
+          <option value="HIGH">HIGH</option>
+          <option value="CRITICAL">CRITICAL</option>
+        </select>
+        <button
+          onClick={() => {
+            setEvidenceUserFilter("");
+            setEvidenceLevelFilter("");
+          }}
+          className="rounded-2xl bg-slate-800 text-white font-bold px-4 py-3"
+        >
+          Clear Filters
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        {evidence.length === 0 && <Empty text="No evidence records found" />}
+        {evidence.map((item, i) => <EvidenceCard key={i} item={item} />)}
+      </div>
+    </Panel>
+  );
+}
+
+function EvidenceCard({ item }) {
+  return (
+    <div className="rounded-3xl border border-slate-200 bg-white p-5">
+      <div className="flex justify-between gap-4 flex-wrap">
+        <div>
+          <p className="font-black text-slate-950">{item.userId || "Unknown User"}</p>
+          <p className="text-sm text-slate-500 mt-1">{formatIST(item.createdAt)}</p>
+        </div>
+        <Badge
+          label={item.threatLevel || "UNKNOWN"}
+          className={statusStyle[item.threatLevel] || "bg-slate-50 text-slate-700 border-slate-200"}
+        />
+      </div>
+
+      <p className="text-sm text-slate-600 mt-4">{item.reason || "No reason"}</p>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-5">
+        <Info label="Risk Score" value={item.riskScore || 0} />
+        <Info label="Path" value={item.screenshotPath || "N/A"} />
+      </div>
+    </div>
   );
 }
 
@@ -990,11 +1182,47 @@ function ReportCard({ report }) {
       <div className="flex justify-between gap-4 flex-wrap">
         <div>
           <p className="font-black text-slate-950">{report.userId || "Unknown User"}</p>
-          <p className="text-sm text-slate-400 mt-1">{formatIST(report.createdAt)}</p>
+          <p className="text-sm text-slate-400 mt-1">{formatIST(report.createdAt || report.submittedAt)}</p>
         </div>
-        <Badge label={report.result || "UNKNOWN"} className={statusStyle[report.result] || "bg-slate-50 text-slate-700 border-slate-200"} />
+
+        <Badge
+          label={report.result || "UNKNOWN"}
+          className={statusStyle[report.result] || "bg-slate-50 text-slate-700 border-slate-200"}
+        />
       </div>
-      <p className="text-sm text-slate-600 mt-4">Warnings: {report.warnings || 0}</p>
+
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mt-5">
+        <Info label="Score" value={`${report.scorePercent || 0}%`} />
+        <Info label="Correct" value={report.correctAnswers || 0} />
+        <Info label="Wrong" value={report.wrongAnswers || 0} />
+        <Info label="Unanswered" value={report.unanswered || 0} />
+        <Info label="Warnings" value={report.warnings || 0} />
+      </div>
+
+      {Array.isArray(report.answers) && report.answers.length > 0 && (
+        <details className="mt-5">
+          <summary className="font-bold cursor-pointer text-blue-700">
+            View Answer Details
+          </summary>
+
+          <div className="mt-4 space-y-3">
+            {report.answers.map((a, idx) => (
+              <div
+                key={idx}
+                className={`rounded-2xl border p-4 ${
+                  a.isCorrect ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200"
+                }`}
+              >
+                <p className="font-semibold">
+                  {a.questionNo}. {a.question}
+                </p>
+                <p className="text-sm mt-2">Selected: {a.selectedAnswer}</p>
+                <p className="text-sm">Correct: {a.correctAnswer}</p>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
     </div>
   );
 }
@@ -1070,7 +1298,7 @@ function Info({ label, value }) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-4">
       <p className="text-xs text-slate-500 uppercase tracking-wider">{label}</p>
-      <p className="font-black text-slate-950 break-words mt-2">{value ?? "N/A"}</p>
+      <p className="font-black text-slate-950 break-words mt-2">{safe(value)}</p>
     </div>
   );
 }
