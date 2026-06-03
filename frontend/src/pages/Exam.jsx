@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 
 const API = "https://continuous-authentication-system.onrender.com";
 const MAX_WARNINGS = 3;
+const EXAM_TIME_SECONDS = 15 * 60;
 
 const examTasks = [
   {
@@ -37,38 +38,28 @@ const examTasks = [
   },
   {
     type: "sentence",
-    question:
-      "Type exactly: Continuous authentication improves security using typing rhythm and mouse behavior.",
-    answer:
-      "Continuous authentication improves security using typing rhythm and mouse behavior.",
+    question: "Type exactly: Continuous authentication improves security using typing rhythm and mouse behavior.",
+    answer: "Continuous authentication improves security using typing rhythm and mouse behavior.",
   },
   {
     type: "sentence",
-    question:
-      "Type exactly: User monitoring detects suspicious activity during online examination sessions.",
-    answer:
-      "User monitoring detects suspicious activity during online examination sessions.",
+    question: "Type exactly: User monitoring detects suspicious activity during online examination sessions.",
+    answer: "User monitoring detects suspicious activity during online examination sessions.",
   },
   {
     type: "sentence",
-    question:
-      "Type exactly: Hold time and flight time are important keystroke dynamics features.",
-    answer:
-      "Hold time and flight time are important keystroke dynamics features.",
+    question: "Type exactly: Hold time and flight time are important keystroke dynamics features.",
+    answer: "Hold time and flight time are important keystroke dynamics features.",
   },
   {
     type: "sentence",
-    question:
-      "Type exactly: MongoDB stores user baseline, alerts, reports, and login activity logs.",
-    answer:
-      "MongoDB stores user baseline, alerts, reports, and login activity logs.",
+    question: "Type exactly: MongoDB stores user baseline, alerts, reports, and login activity logs.",
+    answer: "MongoDB stores user baseline, alerts, reports, and login activity logs.",
   },
   {
     type: "sentence",
-    question:
-      "Type exactly: Repeated abnormal behavior can result in automatic user logout.",
-    answer:
-      "Repeated abnormal behavior can result in automatic user logout.",
+    question: "Type exactly: Repeated abnormal behavior can result in automatic user logout.",
+    answer: "Repeated abnormal behavior can result in automatic user logout.",
   },
 ];
 
@@ -106,6 +97,7 @@ const warningText = {
   CLICK_ACTIVITY_CHANGED: "Click activity pattern changed.",
   FRAUD_STATUS: "High risk behavior detected.",
   SUSPICIOUS_STATUS: "Suspicious behavior detected.",
+  TIME_UP: "Exam time completed. Auto submitting exam.",
 };
 
 const patternReasons = [
@@ -129,9 +121,8 @@ const normalizeText = (text = "") =>
     .replace(/[.,!?;:]/g, "")
     .trim();
 
-const isSentenceCorrect = (typed, correct) => {
-  return normalizeText(typed) === normalizeText(correct);
-};
+const isSentenceCorrect = (typed, correct) =>
+  normalizeText(typed) === normalizeText(correct);
 
 function Exam() {
   const navigate = useNavigate();
@@ -142,6 +133,7 @@ function Exam() {
   const [answers, setAnswers] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [visibleWarnings, setVisibleWarnings] = useState([]);
+  const [timeLeft, setTimeLeft] = useState(EXAM_TIME_SECONDS);
   const [startedAt] = useState(new Date().toISOString());
 
   const currentTask = useMemo(() => examTasks[index], [index]);
@@ -191,8 +183,24 @@ function Exam() {
     userRef.current = parsedUser;
   }, [navigate]);
 
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 1 && !logoutRef.current) {
+          handleAutoSubmitByTime();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [answers, selectedOption, textAnswer, index]);
+
   const buildCurrentAnswer = () => {
-    const currentAnswer = currentTask.type === "mcq" ? selectedOption : textAnswer;
+    const currentAnswer =
+      currentTask.type === "mcq" ? selectedOption : textAnswer;
+
     const isCorrect =
       currentTask.type === "mcq"
         ? selectedOption === currentTask.answer
@@ -239,12 +247,15 @@ function Exam() {
     };
   };
 
+  const mergeAnswer = (list, answerObj) => {
+    const withoutCurrent = list.filter((a) => a.questionNo !== answerObj.questionNo);
+    return [...withoutCurrent, answerObj].sort((a, b) => a.questionNo - b.questionNo);
+  };
+
   const calculateScore = (finalAnswers) => {
     const totalQuestions = examTasks.length;
     const correctAnswers = finalAnswers.filter((a) => a.isCorrect).length;
-    const unanswered = finalAnswers.filter(
-      (a) => !a.selectedAnswer || a.selectedAnswer === "Not Answered"
-    ).length;
+    const unanswered = totalQuestions - finalAnswers.filter((a) => a.selectedAnswer !== "Not Answered").length;
     const wrongAnswers = totalQuestions - correctAnswers - unanswered;
 
     const scorePercent =
@@ -261,7 +272,7 @@ function Exam() {
     }
 
     if (
-      warningCountRef.current >= 5 ||
+      warningCountRef.current > MAX_WARNINGS ||
       latestAnalysisRef.current.status === "FRAUD"
     ) {
       result = "SUSPICIOUS";
@@ -283,7 +294,7 @@ function Exam() {
     autoLogout = false
   ) => {
     const user = userRef.current;
-    if (!user) return;
+    if (!user || submitting) return;
 
     setSubmitting(true);
 
@@ -344,6 +355,7 @@ function Exam() {
           similarity: latestAnalysisRef.current.similarity,
           startedAt,
           submittedAt: new Date().toISOString(),
+          createdAt: new Date().toISOString(),
           autoLogout,
         }),
       });
@@ -360,7 +372,7 @@ function Exam() {
         alert("Exam submitted successfully.");
         navigate("/user");
       }
-    } catch (error) {
+    } catch {
       if (!autoLogout) {
         alert("Backend connection failed. Please try again.");
       }
@@ -369,13 +381,21 @@ function Exam() {
     setSubmitting(false);
   };
 
-  const saveAutoLogoutReport = async (reason) => {
+  const finalAnswersWithCurrent = () => {
     const currentAnswerObj = buildCurrentAnswer();
-    const alreadyIncluded = answers.some(
-      (a) => a.questionNo === currentAnswerObj.questionNo
-    );
-    const finalAnswers = alreadyIncluded ? answers : [...answers, currentAnswerObj];
+    return mergeAnswer(answers, currentAnswerObj);
+  };
 
+  const handleAutoSubmitByTime = async () => {
+    if (logoutRef.current) return;
+    logoutRef.current = true;
+    await addWarning("TIME_UP", false);
+    await submitExam(finalAnswersWithCurrent(), "TIME_UP", false);
+    navigate("/user");
+  };
+
+  const saveAutoLogoutReport = async (reason) => {
+    const finalAnswers = finalAnswersWithCurrent();
     await submitExam(finalAnswers, reason, true);
   };
 
@@ -408,11 +428,10 @@ function Exam() {
     }, 1500);
   };
 
-  const addWarning = async (type, customMessage = null) => {
-    if (logoutRef.current) return;
+  const addWarning = async (type, canAutoLogout = true) => {
+    if (logoutRef.current && type !== "TIME_UP") return;
 
-    const message =
-      customMessage || warningText[type] || "Suspicious exam activity detected.";
+    const message = warningText[type] || "Suspicious exam activity detected.";
 
     warningCountRef.current += 1;
 
@@ -427,7 +446,7 @@ function Exam() {
     warningDetailsRef.current.push(item);
     setVisibleWarnings((prev) => [item, ...prev].slice(0, 4));
 
-    if (warningCountRef.current > MAX_WARNINGS) {
+    if (canAutoLogout && warningCountRef.current > MAX_WARNINGS) {
       await triggerAutoLogout(type);
     }
   };
@@ -440,7 +459,6 @@ function Exam() {
           time: Date.now(),
           questionNo: index + 1,
         });
-
         addWarning("TAB_SWITCH");
       }
     };
@@ -451,7 +469,6 @@ function Exam() {
         time: Date.now(),
         questionNo: index + 1,
       });
-
       addWarning("WINDOW_BLUR");
     };
 
@@ -462,13 +479,11 @@ function Exam() {
 
     const onPaste = (e) => {
       e.preventDefault();
-
       eventsRef.current.pasteEvents.push({
         type: "paste",
         time: Date.now(),
         questionNo: index + 1,
       });
-
       addWarning("PASTE_BLOCKED");
     };
 
@@ -622,7 +637,7 @@ function Exam() {
       window.removeEventListener("mousedown", onMouseDown);
       window.removeEventListener("mouseup", onMouseUp);
     };
-  }, [index, answers]);
+  }, [index, answers, selectedOption, textAnswer]);
 
   const resetQuestionCapture = () => {
     eventsRef.current = emptyEvents();
@@ -707,7 +722,7 @@ function Exam() {
       if (logoutRef.current || !userRef.current) return;
 
       const current = buildCurrentAnswer();
-      const currentSamples = [...answers, current];
+      const currentSamples = mergeAnswer(answers, current);
 
       const totalEvents =
         current.sample.keys.length +
@@ -724,6 +739,7 @@ function Exam() {
 
   const currentAnswer = currentTask.type === "mcq" ? selectedOption : textAnswer;
   const canProceed = currentAnswer.trim().length > 0;
+  const progressPercent = Math.round(((index + 1) / examTasks.length) * 100);
 
   const handleNext = () => {
     if (!currentAnswer.trim()) {
@@ -732,7 +748,7 @@ function Exam() {
     }
 
     const answerObj = buildCurrentAnswer();
-    const updatedAnswers = [...answers, answerObj];
+    const updatedAnswers = mergeAnswer(answers, answerObj);
 
     setAnswers(updatedAnswers);
     saveBehaviorInBackground(answerObj, updatedAnswers);
@@ -746,7 +762,11 @@ function Exam() {
     submitExam(updatedAnswers);
   };
 
-  const progressPercent = Math.round(((index + 1) / examTasks.length) * 100);
+  const formatTimer = (seconds) => {
+    const min = Math.floor(seconds / 60);
+    const sec = seconds % 60;
+    return `${String(min).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+  };
 
   return (
     <div className="min-h-screen bg-slate-100 p-6 select-none">
@@ -760,7 +780,7 @@ function Exam() {
               <div className="flex justify-between gap-4">
                 <div>
                   <p className="font-bold">
-                    Warning {warningDetailsRef.current.length}/{MAX_WARNINGS}
+                    Warning {warningCountRef.current}/{MAX_WARNINGS}
                   </p>
                   <p className="text-sm mt-1">{w.message}</p>
                 </div>
@@ -793,11 +813,10 @@ function Exam() {
               </p>
             </div>
 
-            <div className="bg-blue-50 border border-blue-200 rounded-2xl px-5 py-3">
-              <p className="text-sm text-blue-600 font-semibold">Question</p>
-              <p className="text-2xl font-black text-blue-700">
-                {index + 1} / {examTasks.length}
-              </p>
+            <div className="grid grid-cols-3 gap-3">
+              <InfoBox title="Time" value={formatTimer(timeLeft)} tone={timeLeft < 120 ? "danger" : "normal"} />
+              <InfoBox title="Question" value={`${index + 1}/${examTasks.length}`} />
+              <InfoBox title="Warnings" value={`${warningCountRef.current}/${MAX_WARNINGS}`} tone={warningCountRef.current >= 2 ? "danger" : "normal"} />
             </div>
           </div>
 
@@ -841,12 +860,22 @@ function Exam() {
             <textarea
               value={textAnswer}
               onChange={(e) => setTextAnswer(e.target.value)}
+              onPaste={(e) => e.preventDefault()}
+              onCopy={(e) => e.preventDefault()}
+              onCut={(e) => e.preventDefault()}
+              spellCheck={false}
+              autoCorrect="off"
+              autoCapitalize="off"
               className="w-full h-44 rounded-3xl border border-slate-200 p-5 text-lg outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="Type your answer here..."
             />
           )}
 
-          <div className="flex justify-end mt-8">
+          <div className="flex justify-between items-center mt-8">
+            <p className="text-sm text-slate-500">
+              Copy, paste, right click, tab switch and behavior mismatch are monitored.
+            </p>
+
             <button
               type="button"
               onClick={handleNext}
@@ -870,6 +899,21 @@ function Exam() {
           Exam activity is securely monitored for academic integrity.
         </div>
       </div>
+    </div>
+  );
+}
+
+function InfoBox({ title, value, tone = "normal" }) {
+  return (
+    <div
+      className={`border rounded-2xl px-5 py-3 ${
+        tone === "danger"
+          ? "bg-red-50 border-red-200 text-red-700"
+          : "bg-blue-50 border-blue-200 text-blue-700"
+      }`}
+    >
+      <p className="text-xs font-bold">{title}</p>
+      <p className="text-2xl font-black">{value}</p>
     </div>
   );
 }

@@ -18,7 +18,7 @@ CORS(app)
 
 MONGO_URI = "mongodb+srv://Monitor:monitor12345@cluster0.4dytkvk.mongodb.net/?appName=Cluster0"
 DB_NAME = "monitor_system"
-FEATURE_SIZE = 12
+FEATURE_SIZE = 16
 
 client = None
 db = None
@@ -181,93 +181,131 @@ def extract_features(data):
     if not data:
         return np.array([0.0] * FEATURE_SIZE, dtype=np.float32)
 
-    all_hold_times = []
-    all_flight_times = []
-    all_mouse_speeds = []
-    all_click_intervals = []
+    hold_times = []
+    flight_times = []
+    mouse_speeds = []
+    click_intervals = []
+    pause_times = []
+
     key_counts = []
     click_counts = []
+    mouse_counts = []
+
     backspace_count = 0
-    app_switch_count = 0
+    paste_count = 0
+    focus_count = 0
+    tab_switch_count = 0
+    drag_count = 0
+
     first_time = None
     last_time = None
 
     for d in data:
-        keys = d.get("keys", [])
-        mouse_events = d.get("mouse", [])
-        clicks = d.get("clicks", [])
-        scrolls = d.get("scrolls", [])
-        focus_events = d.get("focusEvents", [])
-        paste_events = d.get("pasteEvents", [])
+        if not isinstance(d, dict):
+            continue
 
-        hold_times = d.get("holdTimes", [])
-        flight_times = d.get("flightTimes", [])
-        mouse_speeds = d.get("mouseSpeeds", [])
+        # Support both frontend formats: keys/keyEvents, mouse/mouseEvents, clicks/clickEvents
+        keys = d.get("keys", d.get("keyEvents", [])) or []
+        mouse_events = d.get("mouse", d.get("mouseEvents", [])) or []
+        clicks = d.get("clicks", d.get("clickEvents", [])) or []
+        scrolls = d.get("scrolls", d.get("scrollEvents", [])) or []
+        focus_events = d.get("focusEvents", []) or []
+        paste_events = d.get("pasteEvents", []) or []
+        tab_switches = d.get("tabSwitches", []) or []
+        drags = d.get("drags", d.get("dragEvents", [])) or []
 
         key_counts.append(len(keys))
         click_counts.append(len(clicks))
-        app_switch_count += len(focus_events)
+        mouse_counts.append(len(mouse_events))
+
+        paste_count += len(paste_events)
+        focus_count += len(focus_events)
+        tab_switch_count += len(tab_switches)
+        drag_count += len(drags)
+
+        hold_times.extend([float(x) for x in d.get("holdTimes", []) if x is not None])
+        flight_times.extend([float(x) for x in d.get("flightTimes", []) if x is not None])
+        mouse_speeds.extend([float(x) for x in d.get("mouseSpeeds", []) if x is not None])
+
+        key_down_map = {}
+        key_times = []
 
         for k in keys:
-            key_name = str(k.get("key", "")).lower()
+            if not isinstance(k, dict):
+                continue
+
+            key_name = str(k.get("key", k.get("code", ""))).lower()
+            key_type = str(k.get("type", "")).lower()
+            t = k.get("time")
+
             if "backspace" in key_name:
                 backspace_count += 1
 
-            t = k.get("time")
             if t is not None:
-                first_time = t if first_time is None else min(first_time, t)
-                last_time = t if last_time is None else max(last_time, t)
+                try:
+                    t = float(t)
+                    key_times.append(t)
+                    first_time = t if first_time is None else min(first_time, t)
+                    last_time = t if last_time is None else max(last_time, t)
+                except Exception:
+                    t = None
 
-        for ev in mouse_events + clicks + scrolls + focus_events + paste_events:
-            t = ev.get("time")
+            if key_type in ["down", "keydown"]:
+                key_down_map[key_name] = t
+            elif key_type in ["up", "keyup"] and key_name in key_down_map and t is not None:
+                down_time = key_down_map.get(key_name)
+                if down_time is not None:
+                    hold = t - down_time
+                    if 0 < hold < 3000:
+                        hold_times.append(float(hold))
+
+        if len(key_times) > 1:
+            diffs = np.diff(sorted(key_times))
+            for x in diffs:
+                if 0 < x < 3000:
+                    flight_times.append(float(x))
+                if x >= 1200:
+                    pause_times.append(float(x))
+
+        for ev in mouse_events + clicks + scrolls + focus_events + paste_events + tab_switches + drags:
+            if not isinstance(ev, dict):
+                continue
+            t = ev.get("time") or ev.get("startTime") or ev.get("endTime")
             if t is not None:
-                first_time = t if first_time is None else min(first_time, t)
-                last_time = t if last_time is None else max(last_time, t)
+                try:
+                    t = float(t)
+                    first_time = t if first_time is None else min(first_time, t)
+                    last_time = t if last_time is None else max(last_time, t)
+                except Exception:
+                    pass
 
-        all_hold_times.extend([float(x) for x in hold_times if x is not None])
-        all_flight_times.extend([float(x) for x in flight_times if x is not None])
-        all_mouse_speeds.extend([float(x) for x in mouse_speeds if x is not None])
-
-        if not hold_times and keys:
-            key_down_map = {}
-            for k in keys:
-                key_type = k.get("type")
-                key_name = k.get("key")
-                key_time = k.get("time")
-
-                if key_type == "down":
-                    key_down_map[key_name] = key_time
-                elif key_type == "up" and key_name in key_down_map:
-                    hold = key_time - key_down_map[key_name]
-                    if hold > 0:
-                        all_hold_times.append(float(hold))
-
-        if not flight_times and keys:
-            times = [k.get("time") for k in keys if k.get("time") is not None]
-            if len(times) > 1:
-                diff = np.diff(times)
-                diff = diff[diff > 0]
-                all_flight_times.extend(diff.tolist())
-
-        if not mouse_speeds and mouse_events:
+        if len(mouse_events) > 1:
             for i in range(1, len(mouse_events)):
                 prev = mouse_events[i - 1]
                 curr = mouse_events[i]
-
+                if not isinstance(prev, dict) or not isinstance(curr, dict):
+                    continue
                 if all(k in prev for k in ["x", "y", "time"]) and all(k in curr for k in ["x", "y", "time"]):
-                    dx = curr["x"] - prev["x"]
-                    dy = curr["y"] - prev["y"]
-                    dt = curr["time"] - prev["time"]
+                    try:
+                        dx = float(curr["x"]) - float(prev["x"])
+                        dy = float(curr["y"]) - float(prev["y"])
+                        dt = float(curr["time"]) - float(prev["time"])
+                        if dt > 0:
+                            mouse_speeds.append(float(np.sqrt(dx * dx + dy * dy) / dt))
+                    except Exception:
+                        pass
 
-                    if dt > 0:
-                        all_mouse_speeds.append(float(np.sqrt(dx * dx + dy * dy) / dt))
-
-        if clicks:
-            click_times = [c.get("time") for c in clicks if c.get("time") is not None]
+        if len(clicks) > 1:
+            click_times = []
+            for c in clicks:
+                if isinstance(c, dict) and c.get("time") is not None:
+                    try:
+                        click_times.append(float(c.get("time")))
+                    except Exception:
+                        pass
             if len(click_times) > 1:
-                diff = np.diff(click_times)
-                diff = diff[diff > 0]
-                all_click_intervals.extend(diff.tolist())
+                diffs = np.diff(sorted(click_times))
+                click_intervals.extend([float(x) for x in diffs if x > 0])
 
     session_seconds = 0.0
     if first_time is not None and last_time is not None and last_time > first_time:
@@ -275,46 +313,58 @@ def extract_features(data):
 
     total_keys = sum(key_counts)
     typing_speed = total_keys / session_seconds if session_seconds > 0 else 0.0
+    mouse_activity = sum(mouse_counts) / session_seconds if session_seconds > 0 else 0.0
+    error_rate = backspace_count / total_keys if total_keys > 0 else 0.0
 
     return np.array([
-        float(np.mean(all_hold_times)) if all_hold_times else 0.0,
-        float(np.std(all_hold_times)) if all_hold_times else 0.0,
-        float(np.mean(all_flight_times)) if all_flight_times else 0.0,
-        float(np.std(all_flight_times)) if all_flight_times else 0.0,
-        float(np.mean(all_mouse_speeds)) if all_mouse_speeds else 0.0,
-        float(np.std(all_mouse_speeds)) if all_mouse_speeds else 0.0,
+        float(np.mean(hold_times)) if hold_times else 0.0,
+        float(np.std(hold_times)) if hold_times else 0.0,
+        float(np.mean(flight_times)) if flight_times else 0.0,
+        float(np.std(flight_times)) if flight_times else 0.0,
+        float(np.mean(mouse_speeds)) if mouse_speeds else 0.0,
+        float(np.std(mouse_speeds)) if mouse_speeds else 0.0,
         float(np.mean(key_counts)) if key_counts else 0.0,
         float(np.mean(click_counts)) if click_counts else 0.0,
         float(typing_speed),
         float(backspace_count),
-        float(app_switch_count),
-        float(np.mean(all_click_intervals)) if all_click_intervals else 0.0
+        float(focus_count),
+        float(np.mean(click_intervals)) if click_intervals else 0.0,
+        float(paste_count),
+        float(tab_switch_count),
+        float(error_rate),
+        float(mouse_activity),
     ], dtype=np.float32)
 
-
 def compute_training_statistics(samples):
-    feature_vectors = [extract_features([sample]) for sample in samples]
+    feature_vectors = []
+
+    for sample in samples:
+        raw = sample.get("rawEvents") if isinstance(sample, dict) else None
+        if raw:
+            feature_vectors.append(extract_features([raw]))
+        else:
+            feature_vectors.append(extract_features([sample]))
 
     if not feature_vectors:
         return {
             "featureVectors": [],
             "baselineMean": [0.0] * FEATURE_SIZE,
             "baselineStd": [0.0] * FEATURE_SIZE,
-            "personalThreshold": 0.60
+            "personalThreshold": 0.62
         }
 
     matrix = np.vstack(feature_vectors)
     baseline_mean = np.mean(matrix, axis=0)
     baseline_std = np.std(matrix, axis=0)
 
-    stability = float(np.mean(baseline_std))
+    consistency = float(np.mean(baseline_std[:8]))
 
-    if stability < 20:
-        threshold = 0.58
-    elif stability < 60:
-        threshold = 0.60
-    else:
+    if consistency < 15:
+        threshold = 0.66
+    elif consistency < 45:
         threshold = 0.62
+    else:
+        threshold = 0.58
 
     return {
         "featureVectors": [normalize_vector(vec).tolist() for vec in feature_vectors],
@@ -323,15 +373,16 @@ def compute_training_statistics(samples):
         "personalThreshold": threshold
     }
 
-
 def tolerance_check(base_mean, base_std, curr_vec):
-    mismatch_count = 0
+    mismatch_count = 0.0
     alerts = []
 
-    tolerance = np.maximum(base_std * 2.5, np.array([
-        80.0, 60.0, 100.0, 80.0, 0.8, 0.6,
-        20.0, 10.0, 5.0, 12.0, 8.0, 1200.0
-    ], dtype=np.float32))
+    min_tolerance = np.array([
+        70, 50, 90, 70, 0.7, 0.5, 18, 8,
+        4, 8, 5, 900, 1, 1, 0.12, 3
+    ], dtype=np.float32)
+
+    tolerance = np.maximum(base_std * 2.2, min_tolerance)
 
     names = [
         "HOLD_TIME_CHANGED",
@@ -345,18 +396,23 @@ def tolerance_check(base_mean, base_std, curr_vec):
         "TYPING_SPEED_CHANGED",
         "BACKSPACE_PATTERN_CHANGED",
         "APP_SWITCH_PATTERN_CHANGED",
-        "CLICK_INTERVAL_CHANGED"
+        "CLICK_INTERVAL_CHANGED",
+        "PASTE_PATTERN_CHANGED",
+        "TAB_SWITCH_PATTERN_CHANGED",
+        "ERROR_RATE_CHANGED",
+        "MOUSE_ACTIVITY_CHANGED",
     ]
+
+    weights = [1, 0.7, 1, 0.7, 0.6, 0.5, 1, 0.7, 1, 0.8, 1, 0.5, 1.2, 1.2, 0.8, 0.6]
 
     diffs = np.abs(curr_vec - base_mean)
 
     for i in range(len(diffs)):
         if diffs[i] > tolerance[i]:
-            mismatch_count += 0.5 if i in [4, 5, 7, 10] else 1
+            mismatch_count += weights[i]
             alerts.append(names[i])
 
-    return float(mismatch_count), alerts
-
+    return float(round(mismatch_count, 2)), alerts
 
 def desktop_rule_detection(events):
     keys = len(events.get("keys", []))
@@ -395,57 +451,81 @@ def rule_based_detection(copy_paste=0, tab_switch=0, warnings=0, focus_lost=0, d
     risk = 0
     alerts = []
 
-    if copy_paste > 2:
-        risk += 15
+    if copy_paste >= 1:
+        risk += min(copy_paste * 12, 30)
         alerts.append("COPY_PASTE")
 
-    if tab_switch > 3:
-        risk += 15
+    if tab_switch >= 1:
+        risk += min(tab_switch * 12, 35)
         alerts.append("TAB_SWITCH")
 
-    if focus_lost > 3:
-        risk += 10
+    if focus_lost >= 2:
+        risk += min(focus_lost * 8, 25)
         alerts.append("WINDOW_FOCUS_LOST")
+
+    if warnings >= 2:
+        risk += min(warnings * 8, 30)
+        alerts.append("WARNING_COUNT")
 
     if drag_count > 10:
         risk += 8
         alerts.append("EXCESSIVE_DRAG_ACTIVITY")
 
-    if warnings > 2:
-        risk += min(warnings * 5, 20)
-        alerts.append("WARNING_COUNT")
-
-    return risk, alerts
-
+    return min(risk, 100), alerts
 
 def ai_risk_from_similarity(similarity, threshold):
     risk = 0
     alerts = []
 
-    if similarity < threshold:
-        risk += 10
+    gap = threshold - similarity
+
+    if gap > 0:
+        risk += int(min(gap * 120, 35))
         alerts.append("AI_SIMILARITY_LOW")
 
-    if similarity < threshold - 0.15:
-        risk += 10
+    if gap > 0.12:
+        risk += 12
         alerts.append("AI_SIMILARITY_VERY_LOW")
 
-    if similarity < threshold - 0.25:
-        risk += 10
+    if gap > 0.22:
+        risk += 18
         alerts.append("AI_SIMILARITY_CRITICAL")
 
-    return risk, alerts
-
+    return min(risk, 100), alerts
 
 def classify_user(similarity, mismatch_count, rule_risk, threshold):
-    if similarity >= threshold and mismatch_count <= 2 and rule_risk < 35:
+    if similarity >= threshold and mismatch_count <= 2.5 and rule_risk < 25:
         return "GENUINE"
 
-    if similarity < threshold - 0.25 and (mismatch_count >= 5 or rule_risk >= 50):
+    if similarity < threshold - 0.22 or mismatch_count >= 6 or rule_risk >= 55:
         return "FRAUD"
 
     return "SUSPICIOUS"
 
+def smoothed_status(user_id, current_status, current_risk):
+    recent = list(
+        db.analysis.find(
+            {"userId": {"$regex": f"^{user_id}$", "$options": "i"}},
+            {"_id": 0, "riskScore": 1, "status": 1}
+        ).sort("createdAt", -1).limit(4)
+    )
+
+    risks = [int(x.get("riskScore", 0)) for x in recent]
+    risks.append(int(current_risk))
+
+    avg_risk = int(np.mean(risks)) if risks else int(current_risk)
+
+    statuses = [x.get("status") for x in recent] + [current_status]
+    fraud_count = statuses.count("FRAUD")
+    suspicious_count = statuses.count("SUSPICIOUS")
+
+    if fraud_count >= 2 or avg_risk >= 75:
+        return "FRAUD", avg_risk
+
+    if suspicious_count >= 2 or avg_risk >= 40:
+        return "SUSPICIOUS", avg_risk
+
+    return "GENUINE", avg_risk
 
 def update_user_decision_state(user_id, status, risk):
     state = db.user_decision_state.find_one({"userId": user_id}) or {
@@ -1017,6 +1097,14 @@ def save_training():
     if not isinstance(samples, list) or len(samples) == 0:
         return jsonify({"error": "samples required"}), 400
 
+    total_keys = 0
+    for sample in samples:
+        raw = sample.get("rawEvents", sample) if isinstance(sample, dict) else {}
+        total_keys += len(raw.get("keys", raw.get("keyEvents", [])))
+
+    if quality_score < 80:
+        return jsonify({"error": "Training quality too low. Please complete training properly."}), 400
+
     stats = compute_training_statistics(samples)
 
     db.training.replace_one(
@@ -1108,14 +1196,20 @@ def analyze():
     if not user_id:
         return jsonify({"error": "userId required"}), 400
 
-    baseline = db.training.find_one({"userId": {"$regex": f"^{user_id}$", "$options": "i"}})
+    if not isinstance(samples, list) or len(samples) == 0:
+        return jsonify({"error": "samples required"}), 400
+
+    baseline = db.training.find_one({
+        "userId": {"$regex": f"^{user_id}$", "$options": "i"}
+    })
+
     if not baseline:
         return jsonify({"error": "No baseline"}), 404
 
     current_vec = extract_features(samples)
     base_mean = normalize_vector(baseline.get("baselineMean"))
     base_std = normalize_vector(baseline.get("baselineStd"))
-    threshold = float(baseline.get("personalThreshold", 0.60))
+    threshold = float(baseline.get("personalThreshold", 0.62))
 
     copy_paste = int(data.get("copyPaste", 0))
     tab_switch = int(data.get("tabSwitch", 0))
@@ -1126,53 +1220,71 @@ def analyze():
     similarity = compare_vectors(base_mean, current_vec)
     mismatch_count, tolerance_alerts = tolerance_check(base_mean, base_std, current_vec)
     ai_score, ai_alerts = ai_risk_from_similarity(similarity, threshold)
-    rule_score, rule_alerts = rule_based_detection(copy_paste, tab_switch, warnings, focus_lost, drag_count)
+    rule_score, rule_alerts = rule_based_detection(
+        copy_paste, tab_switch, warnings, focus_lost, drag_count
+    )
 
-    risk = min(ai_score + rule_score + int(mismatch_count * 5), 100)
-    status = classify_user(similarity, mismatch_count, rule_score, threshold)
+    ai_component = ai_score * 0.45
+    mismatch_component = min(mismatch_count * 7, 35)
+    rule_component = rule_score * 0.45
 
-    if risk >= 90:
-        status = "FRAUD"
-    elif risk >= 45 and status != "FRAUD":
-        status = "SUSPICIOUS"
+    raw_risk = int(min(ai_component + mismatch_component + rule_component, 100))
+    raw_status = classify_user(similarity, mismatch_count, rule_score, threshold)
 
-    alerts = ai_alerts + rule_alerts + tolerance_alerts
+    status, risk = smoothed_status(user_id, raw_status, raw_risk)
+
+    alerts = list(dict.fromkeys(ai_alerts + rule_alerts + tolerance_alerts))
     decision = update_user_decision_state(user_id, status, risk)
 
     if status in ["SUSPICIOUS", "FRAUD"]:
-        save_alert(user_id, status, f"User {user_id} flagged as {status} with risk score {risk}", risk)
+        save_alert(
+            user_id,
+            status,
+            f"User {user_id} flagged as {status} | Risk {risk} | Similarity {round(similarity, 3)}",
+            risk
+        )
 
     db.analysis.insert_one({
         "userId": user_id,
-        "riskScore": risk,
+        "riskScore": int(risk),
+        "rawRiskScore": int(raw_risk),
         "alerts": alerts,
         "similarity": float(similarity),
+        "threshold": float(threshold),
         "sameUser": bool(similarity >= threshold),
         "status": status,
+        "rawStatus": raw_status,
         "samples": samples,
         "featureVector": current_vec.tolist(),
+        "baselineMean": base_mean.tolist(),
         "copyPaste": copy_paste,
         "tabSwitch": tab_switch,
         "warnings": warnings,
         "focusLost": focus_lost,
         "dragCount": drag_count,
         "mismatchCount": float(mismatch_count),
+        "aiScore": int(ai_score),
+        "ruleScore": int(rule_score),
         "warningCount": decision["warningCount"],
         "source": "exam_or_training",
         "createdAt": now_utc()
     })
 
     return jsonify({
-        "riskScore": risk,
+        "riskScore": int(risk),
+        "rawRiskScore": int(raw_risk),
         "alerts": alerts,
         "similarity": float(similarity),
+        "threshold": float(threshold),
         "sameUser": bool(similarity >= threshold),
         "status": status,
+        "rawStatus": raw_status,
         "mismatchCount": float(mismatch_count),
+        "aiScore": int(ai_score),
+        "ruleScore": int(rule_score),
         "warningCount": decision["warningCount"],
         "lockRequired": decision["lockRequired"]
     })
-
 
 @app.route("/api/behavior/session-save", methods=["POST"])
 def save_behavior_session():
