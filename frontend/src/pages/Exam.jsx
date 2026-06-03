@@ -2,8 +2,19 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 const API = "https://continuous-authentication-system.onrender.com";
+
 const MAX_WARNINGS = 3;
 const EXAM_TIME_SECONDS = 15 * 60;
+
+const FAST_MOUSE_SPEED = 3.5;
+const MOUSE_TELEPORT_DISTANCE = 900;
+const FAST_TYPING_KEYS_IN_3_SEC = 18;
+const IDLE_LIMIT_MS = 30000;
+const BACKSPACE_LIMIT = 15;
+const HIGH_CLICK_LIMIT = 10;
+const HIGH_CLICK_WINDOW_MS = 2000;
+const TAB_SWITCH_LIMIT = 2;
+const BLUR_LIMIT = 3;
 
 const examTasks = [
   {
@@ -38,28 +49,38 @@ const examTasks = [
   },
   {
     type: "sentence",
-    question: "Type exactly: Continuous authentication improves security using typing rhythm and mouse behavior.",
-    answer: "Continuous authentication improves security using typing rhythm and mouse behavior.",
+    question:
+      "Type exactly: Continuous authentication improves security using typing rhythm and mouse behavior.",
+    answer:
+      "Continuous authentication improves security using typing rhythm and mouse behavior.",
   },
   {
     type: "sentence",
-    question: "Type exactly: User monitoring detects suspicious activity during online examination sessions.",
-    answer: "User monitoring detects suspicious activity during online examination sessions.",
+    question:
+      "Type exactly: User monitoring detects suspicious activity during online examination sessions.",
+    answer:
+      "User monitoring detects suspicious activity during online examination sessions.",
   },
   {
     type: "sentence",
-    question: "Type exactly: Hold time and flight time are important keystroke dynamics features.",
-    answer: "Hold time and flight time are important keystroke dynamics features.",
+    question:
+      "Type exactly: Hold time and flight time are important keystroke dynamics features.",
+    answer:
+      "Hold time and flight time are important keystroke dynamics features.",
   },
   {
     type: "sentence",
-    question: "Type exactly: MongoDB stores user baseline, alerts, reports, and login activity logs.",
-    answer: "MongoDB stores user baseline, alerts, reports, and login activity logs.",
+    question:
+      "Type exactly: MongoDB stores user baseline, alerts, reports, and login activity logs.",
+    answer:
+      "MongoDB stores user baseline, alerts, reports, and login activity logs.",
   },
   {
     type: "sentence",
-    question: "Type exactly: Repeated abnormal behavior can result in automatic user logout.",
-    answer: "Repeated abnormal behavior can result in automatic user logout.",
+    question:
+      "Type exactly: Repeated abnormal behavior can result in automatic user logout.",
+    answer:
+      "Repeated abnormal behavior can result in automatic user logout.",
   },
 ];
 
@@ -80,10 +101,19 @@ const emptyEvents = () => ({
 
 const warningText = {
   TAB_SWITCH: "Tab switch detected. Please stay on the exam page.",
+  MULTIPLE_TAB_SWITCH: "Multiple tab switches detected.",
   WINDOW_BLUR: "Exam window focus lost. Please continue in the exam window.",
+  REPEATED_WINDOW_BLUR: "Repeated window focus loss detected.",
   COPY_BLOCKED: "Copy action is not allowed during exam.",
   PASTE_BLOCKED: "Paste action is not allowed during exam.",
+  CUT_BLOCKED: "Cut action is not allowed during exam.",
   RIGHT_CLICK_BLOCKED: "Right click is disabled during exam.",
+  FAST_MOUSE_MOVEMENT: "Abnormal fast mouse movement detected.",
+  MOUSE_TELEPORT: "Unrealistic mouse jump detected.",
+  FAST_TYPING_PATTERN: "Abnormal fast typing pattern detected.",
+  EXCESSIVE_BACKSPACE: "Excessive correction/backspace activity detected.",
+  HIGH_CLICK_RATE: "Abnormal high click rate detected.",
+  NO_ACTIVITY: "No activity detected for a long time.",
   AI_SIMILARITY_LOW: "Your behavior pattern looks different from your training baseline.",
   AI_SIMILARITY_VERY_LOW: "Your behavior pattern is highly different from your training baseline.",
   AI_SIMILARITY_CRITICAL: "Critical behavior mismatch detected.",
@@ -112,6 +142,14 @@ const patternReasons = [
   "MOUSE_VARIANCE_CHANGED",
   "KEY_ACTIVITY_CHANGED",
   "CLICK_ACTIVITY_CHANGED",
+  "FAST_MOUSE_MOVEMENT",
+  "MOUSE_TELEPORT",
+  "FAST_TYPING_PATTERN",
+  "EXCESSIVE_BACKSPACE",
+  "HIGH_CLICK_RATE",
+  "MULTIPLE_TAB_SWITCH",
+  "REPEATED_WINDOW_BLUR",
+  "NO_ACTIVITY",
 ];
 
 const normalizeText = (text = "") =>
@@ -141,19 +179,38 @@ function Exam() {
   const eventsRef = useRef(emptyEvents());
   const warningDetailsRef = useRef([]);
   const warningCountRef = useRef(0);
+
   const keyDownMapRef = useRef({});
   const lastKeyTimeRef = useRef(null);
+  const recentKeyTimesRef = useRef([]);
+  const backspaceCountRef = useRef(0);
+
   const lastMouseRef = useRef(null);
   const lastMouseSaveRef = useRef(0);
+  const clickTimesRef = useRef([]);
   const dragStartRef = useRef(null);
+
   const userRef = useRef(null);
   const logoutRef = useRef(false);
+
+  const lastActivityRef = useRef(Date.now());
   const lastPatternWarningRef = useRef(0);
+  const lastFastMouseWarningRef = useRef(0);
+  const lastMouseTeleportWarningRef = useRef(0);
+  const lastFastTypingWarningRef = useRef(0);
+  const lastBackspaceWarningRef = useRef(0);
+  const lastClickWarningRef = useRef(0);
+  const lastIdleWarningRef = useRef(0);
+
   const latestAnalysisRef = useRef({
     status: "GENUINE",
     riskScore: 0,
     similarity: null,
   });
+
+  const markActivity = () => {
+    lastActivityRef.current = Date.now();
+  };
 
   useEffect(() => {
     const storedUser = localStorage.getItem("user");
@@ -181,6 +238,7 @@ function Exam() {
     }
 
     userRef.current = parsedUser;
+    markActivity();
   }, [navigate]);
 
   useEffect(() => {
@@ -196,6 +254,30 @@ function Exam() {
 
     return () => clearInterval(timer);
   }, [answers, selectedOption, textAnswer, index]);
+
+  useEffect(() => {
+    const idleTimer = setInterval(() => {
+      if (logoutRef.current || submitting) return;
+
+      const now = Date.now();
+      if (
+        now - lastActivityRef.current > IDLE_LIMIT_MS &&
+        now - lastIdleWarningRef.current > IDLE_LIMIT_MS
+      ) {
+        lastIdleWarningRef.current = now;
+
+        eventsRef.current.focusEvents.push({
+          type: "no_activity",
+          time: now,
+          questionNo: index + 1,
+        });
+
+        addWarning("NO_ACTIVITY");
+      }
+    }, 5000);
+
+    return () => clearInterval(idleTimer);
+  }, [index, submitting]);
 
   const buildCurrentAnswer = () => {
     const currentAnswer =
@@ -248,14 +330,21 @@ function Exam() {
   };
 
   const mergeAnswer = (list, answerObj) => {
-    const withoutCurrent = list.filter((a) => a.questionNo !== answerObj.questionNo);
-    return [...withoutCurrent, answerObj].sort((a, b) => a.questionNo - b.questionNo);
+    const withoutCurrent = list.filter(
+      (a) => a.questionNo !== answerObj.questionNo
+    );
+    return [...withoutCurrent, answerObj].sort(
+      (a, b) => a.questionNo - b.questionNo
+    );
   };
 
   const calculateScore = (finalAnswers) => {
     const totalQuestions = examTasks.length;
     const correctAnswers = finalAnswers.filter((a) => a.isCorrect).length;
-    const unanswered = totalQuestions - finalAnswers.filter((a) => a.selectedAnswer !== "Not Answered").length;
+    const answered = finalAnswers.filter(
+      (a) => a.selectedAnswer !== "Not Answered"
+    ).length;
+    const unanswered = totalQuestions - answered;
     const wrongAnswers = totalQuestions - correctAnswers - unanswered;
 
     const scorePercent =
@@ -265,14 +354,14 @@ function Exam() {
 
     let result = "FAIL";
 
-    if (scorePercent >= 80 && warningCountRef.current <= 2) {
+    if (scorePercent >= 80 && warningCountRef.current < MAX_WARNINGS) {
       result = "PASS";
     } else if (scorePercent >= 50) {
       result = "REVIEW";
     }
 
     if (
-      warningCountRef.current > MAX_WARNINGS ||
+      warningCountRef.current >= MAX_WARNINGS ||
       latestAnalysisRef.current.status === "FRAUD"
     ) {
       result = "SUSPICIOUS";
@@ -446,7 +535,7 @@ function Exam() {
     warningDetailsRef.current.push(item);
     setVisibleWarnings((prev) => [item, ...prev].slice(0, 4));
 
-    if (canAutoLogout && warningCountRef.current > MAX_WARNINGS) {
+    if (canAutoLogout && warningCountRef.current >= MAX_WARNINGS) {
       await triggerAutoLogout(type);
     }
   };
@@ -454,46 +543,76 @@ function Exam() {
   useEffect(() => {
     const onVisibility = () => {
       if (document.hidden) {
+        markActivity();
+
         eventsRef.current.tabSwitches.push({
           type: "tab_switch",
           time: Date.now(),
           questionNo: index + 1,
         });
+
         addWarning("TAB_SWITCH");
+
+        if (eventsRef.current.tabSwitches.length >= TAB_SWITCH_LIMIT) {
+          addWarning("MULTIPLE_TAB_SWITCH");
+        }
       }
     };
 
     const onBlur = () => {
+      markActivity();
+
       eventsRef.current.focusEvents.push({
         type: "window_blur",
         time: Date.now(),
         questionNo: index + 1,
       });
+
       addWarning("WINDOW_BLUR");
+
+      const blurCount = eventsRef.current.focusEvents.filter(
+        (x) => x.type === "window_blur"
+      ).length;
+
+      if (blurCount >= BLUR_LIMIT) {
+        addWarning("REPEATED_WINDOW_BLUR");
+      }
     };
 
     const onCopy = (e) => {
       e.preventDefault();
+      markActivity();
       addWarning("COPY_BLOCKED");
     };
 
     const onPaste = (e) => {
       e.preventDefault();
+      markActivity();
+
       eventsRef.current.pasteEvents.push({
         type: "paste",
         time: Date.now(),
         questionNo: index + 1,
       });
+
       addWarning("PASTE_BLOCKED");
+    };
+
+    const onCut = (e) => {
+      e.preventDefault();
+      markActivity();
+      addWarning("CUT_BLOCKED");
     };
 
     const onContextMenu = (e) => {
       e.preventDefault();
+      markActivity();
       addWarning("RIGHT_CLICK_BLOCKED");
     };
 
     const onKeyDown = (e) => {
       const now = Date.now();
+      markActivity();
 
       eventsRef.current.keys.push({
         key: e.key,
@@ -510,11 +629,37 @@ function Exam() {
         }
       }
 
+      recentKeyTimesRef.current.push(now);
+      recentKeyTimesRef.current = recentKeyTimesRef.current.filter(
+        (t) => now - t <= 3000
+      );
+
+      if (
+        recentKeyTimesRef.current.length >= FAST_TYPING_KEYS_IN_3_SEC &&
+        now - lastFastTypingWarningRef.current > 3000
+      ) {
+        lastFastTypingWarningRef.current = now;
+        addWarning("FAST_TYPING_PATTERN");
+      }
+
+      if (String(e.key).toLowerCase() === "backspace") {
+        backspaceCountRef.current += 1;
+
+        if (
+          backspaceCountRef.current >= BACKSPACE_LIMIT &&
+          now - lastBackspaceWarningRef.current > 4000
+        ) {
+          lastBackspaceWarningRef.current = now;
+          addWarning("EXCESSIVE_BACKSPACE");
+        }
+      }
+
       lastKeyTimeRef.current = now;
     };
 
     const onKeyUp = (e) => {
       const now = Date.now();
+      markActivity();
 
       eventsRef.current.keys.push({
         key: e.key,
@@ -534,6 +679,7 @@ function Exam() {
 
     const onMouseMove = (e) => {
       const now = Date.now();
+      markActivity();
 
       if (now - lastMouseSaveRef.current < 70) return;
       lastMouseSaveRef.current = now;
@@ -549,10 +695,27 @@ function Exam() {
         const dx = e.clientX - lastMouseRef.current.x;
         const dy = e.clientY - lastMouseRef.current.y;
         const dt = now - lastMouseRef.current.time;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        if (
+          distance >= MOUSE_TELEPORT_DISTANCE &&
+          now - lastMouseTeleportWarningRef.current > 3000
+        ) {
+          lastMouseTeleportWarningRef.current = now;
+          addWarning("MOUSE_TELEPORT");
+        }
 
         if (dt > 0) {
-          const speed = Math.sqrt(dx * dx + dy * dy) / dt;
+          const speed = distance / dt;
           eventsRef.current.mouseSpeeds.push(speed);
+
+          if (
+            speed > FAST_MOUSE_SPEED &&
+            now - lastFastMouseWarningRef.current > 2500
+          ) {
+            lastFastMouseWarningRef.current = now;
+            addWarning("FAST_MOUSE_MOVEMENT");
+          }
         }
       }
 
@@ -564,16 +727,34 @@ function Exam() {
     };
 
     const onClick = (e) => {
+      const now = Date.now();
+      markActivity();
+
       eventsRef.current.clicks.push({
         type: "click",
         x: e.clientX,
         y: e.clientY,
         button: e.button,
-        time: Date.now(),
+        time: now,
       });
+
+      clickTimesRef.current.push(now);
+      clickTimesRef.current = clickTimesRef.current.filter(
+        (t) => now - t <= HIGH_CLICK_WINDOW_MS
+      );
+
+      if (
+        clickTimesRef.current.length >= HIGH_CLICK_LIMIT &&
+        now - lastClickWarningRef.current > 3000
+      ) {
+        lastClickWarningRef.current = now;
+        addWarning("HIGH_CLICK_RATE");
+      }
     };
 
     const onWheel = (e) => {
+      markActivity();
+
       eventsRef.current.scrolls.push({
         type: "scroll",
         deltaY: e.deltaY,
@@ -582,6 +763,8 @@ function Exam() {
     };
 
     const onMouseDown = (e) => {
+      markActivity();
+
       dragStartRef.current = {
         x: e.clientX,
         y: e.clientY,
@@ -590,6 +773,8 @@ function Exam() {
     };
 
     const onMouseUp = (e) => {
+      markActivity();
+
       if (!dragStartRef.current) return;
 
       const dx = Math.abs(e.clientX - dragStartRef.current.x);
@@ -613,6 +798,7 @@ function Exam() {
     document.addEventListener("visibilitychange", onVisibility);
     document.addEventListener("copy", onCopy);
     document.addEventListener("paste", onPaste);
+    document.addEventListener("cut", onCut);
     document.addEventListener("contextmenu", onContextMenu);
     window.addEventListener("blur", onBlur);
     window.addEventListener("keydown", onKeyDown);
@@ -627,6 +813,7 @@ function Exam() {
       document.removeEventListener("visibilitychange", onVisibility);
       document.removeEventListener("copy", onCopy);
       document.removeEventListener("paste", onPaste);
+      document.removeEventListener("cut", onCut);
       document.removeEventListener("contextmenu", onContextMenu);
       window.removeEventListener("blur", onBlur);
       window.removeEventListener("keydown", onKeyDown);
@@ -645,8 +832,12 @@ function Exam() {
     lastKeyTimeRef.current = null;
     lastMouseRef.current = null;
     dragStartRef.current = null;
+    recentKeyTimesRef.current = [];
+    backspaceCountRef.current = 0;
+    clickTimesRef.current = [];
     setSelectedOption("");
     setTextAnswer("");
+    markActivity();
   };
 
   const handlePatternWarnings = async (data) => {
@@ -676,7 +867,7 @@ function Exam() {
       return;
     }
 
-    if (data.status === "SUSPICIOUS" && Number(data.riskScore || 0) >= 50) {
+    if (data.status === "SUSPICIOUS" && Number(data.riskScore || 0) >= 35) {
       lastPatternWarningRef.current = now;
       await addWarning("SUSPICIOUS_STATUS");
     }
@@ -727,12 +918,14 @@ function Exam() {
       const totalEvents =
         current.sample.keys.length +
         current.sample.mouse.length +
-        current.sample.clicks.length;
+        current.sample.clicks.length +
+        current.sample.focusEvents.length +
+        current.sample.pasteEvents.length;
 
-      if (totalEvents < 15) return;
+      if (totalEvents < 5) return;
 
       saveBehaviorInBackground(current, currentSamples);
-    }, 5000);
+    }, 3000);
 
     return () => clearInterval(timer);
   }, [answers, index, selectedOption, textAnswer]);
@@ -771,7 +964,7 @@ function Exam() {
   return (
     <div className="min-h-screen bg-slate-100 p-6 select-none">
       {visibleWarnings.length > 0 && (
-        <div className="fixed top-6 right-6 z-50 space-y-3 w-[360px]">
+        <div className="fixed top-6 right-6 z-50 space-y-3 w-[380px]">
           {visibleWarnings.map((w) => (
             <div
               key={w.id}
@@ -814,9 +1007,17 @@ function Exam() {
             </div>
 
             <div className="grid grid-cols-3 gap-3">
-              <InfoBox title="Time" value={formatTimer(timeLeft)} tone={timeLeft < 120 ? "danger" : "normal"} />
+              <InfoBox
+                title="Time"
+                value={formatTimer(timeLeft)}
+                tone={timeLeft < 120 ? "danger" : "normal"}
+              />
               <InfoBox title="Question" value={`${index + 1}/${examTasks.length}`} />
-              <InfoBox title="Warnings" value={`${warningCountRef.current}/${MAX_WARNINGS}`} tone={warningCountRef.current >= 2 ? "danger" : "normal"} />
+              <InfoBox
+                title="Warnings"
+                value={`${warningCountRef.current}/${MAX_WARNINGS}`}
+                tone={warningCountRef.current >= 2 ? "danger" : "normal"}
+              />
             </div>
           </div>
 
@@ -843,7 +1044,10 @@ function Exam() {
                 <button
                   key={optionIndex}
                   type="button"
-                  onClick={() => setSelectedOption(option)}
+                  onClick={() => {
+                    markActivity();
+                    setSelectedOption(option);
+                  }}
                   className={`text-left rounded-2xl border p-5 font-semibold transition ${
                     selectedOption === option
                       ? "bg-blue-600 text-white border-blue-600 shadow"
@@ -859,7 +1063,10 @@ function Exam() {
           {currentTask.type === "sentence" && (
             <textarea
               value={textAnswer}
-              onChange={(e) => setTextAnswer(e.target.value)}
+              onChange={(e) => {
+                markActivity();
+                setTextAnswer(e.target.value);
+              }}
               onPaste={(e) => e.preventDefault()}
               onCopy={(e) => e.preventDefault()}
               onCut={(e) => e.preventDefault()}
@@ -871,9 +1078,9 @@ function Exam() {
             />
           )}
 
-          <div className="flex justify-between items-center mt-8">
+          <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 mt-8">
             <p className="text-sm text-slate-500">
-              Copy, paste, right click, tab switch and behavior mismatch are monitored.
+              Copy, paste, right click, tab switch, idle time, fast typing, high click rate and mouse behavior are monitored.
             </p>
 
             <button
