@@ -18,7 +18,7 @@ CORS(app)
 
 MONGO_URI = "mongodb+srv://Monitor:monitor12345@cluster0.4dytkvk.mongodb.net/?appName=Cluster0"
 DB_NAME = "monitor_system"
-FEATURE_SIZE = 16
+FEATURE_SIZE = 12
 
 client = None
 db = None
