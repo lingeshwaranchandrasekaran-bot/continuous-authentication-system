@@ -1635,6 +1635,98 @@ def threat_summary():
         "low": low,
         "recentAlerts": clean_docs(recent_alerts)
     })
+@app.route("/api/admin/user-analytics/<username>", methods=["GET"])
+def user_analytics(username):
+    ok, resp, code = db_required()
+    if not ok:
+        return resp, code
+
+    user_filter = {"userId": {"$regex": f"^{username}$", "$options": "i"}}
+
+    analysis_docs = list(
+        db.analysis.find(user_filter, {"_id": 0})
+        .sort("createdAt", -1)
+        .limit(20)
+    )
+
+    alert_docs = list(
+        db.alerts.find(user_filter, {"_id": 0})
+        .sort("createdAt", -1)
+        .limit(50)
+    )
+
+    session_docs = list(
+        db.behavior_sessions.find(user_filter, {"_id": 0})
+        .sort("createdAt", -1)
+        .limit(20)
+    )
+
+    risk_trend = []
+    similarity_trend = []
+
+    for a in reversed(analysis_docs):
+        risk_trend.append({
+            "time": clean_value(a.get("createdAt")),
+            "value": a.get("riskScore", 0),
+            "status": a.get("status", "N/A")
+        })
+
+        similarity_trend.append({
+            "time": clean_value(a.get("createdAt")),
+            "value": round(float(a.get("similarity", 0)) * 100, 2)
+            if a.get("similarity") is not None else 0
+        })
+
+    warning_count = {}
+    for a in alert_docs:
+        t = a.get("type", "UNKNOWN")
+        warning_count[t] = warning_count.get(t, 0) + 1
+
+    total_keys = total_mouse = total_clicks = total_sessions = 0
+
+    for s in session_docs:
+        sm = s.get("summary", {})
+        total_keys += sm.get("keys", 0)
+        total_mouse += sm.get("mouse", 0)
+        total_clicks += sm.get("clicks", 0)
+        total_sessions += 1
+
+    metrics = {
+        "sessions": total_sessions,
+        "avgKeys": round(total_keys / total_sessions, 2) if total_sessions else 0,
+        "avgMouse": round(total_mouse / total_sessions, 2) if total_sessions else 0,
+        "avgClicks": round(total_clicks / total_sessions, 2) if total_sessions else 0,
+        "latestRisk": analysis_docs[0].get("riskScore", 0) if analysis_docs else 0,
+        "latestStatus": analysis_docs[0].get("status", "NO DATA") if analysis_docs else "NO DATA",
+        "latestSimilarity": round(float(analysis_docs[0].get("similarity", 0)) * 100, 2)
+        if analysis_docs and analysis_docs[0].get("similarity") is not None else 0
+    }
+
+    timeline = []
+
+    for a in alert_docs[:10]:
+        timeline.append({
+            "type": "Alert",
+            "title": a.get("type", "ALERT"),
+            "message": a.get("message", ""),
+            "time": clean_value(a.get("createdAt"))
+        })
+
+    for a in analysis_docs[:10]:
+        timeline.append({
+            "type": "Analysis",
+            "title": a.get("status", "N/A"),
+            "message": f"Risk {a.get('riskScore', 0)}",
+            "time": clean_value(a.get("createdAt"))
+        })
+
+    return jsonify({
+        "metrics": metrics,
+        "riskTrend": risk_trend,
+        "similarityTrend": similarity_trend,
+        "warnings": warning_count,
+        "timeline": timeline
+    })
 
 
 if __name__ == "__main__":

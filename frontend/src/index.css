@@ -2,9 +2,52 @@
 @tailwind components;
 @tailwind utilities;
 
-/* 🔥 Clean UI Reset */
+/* Clean UI Reset */
 body {
   margin: 0;
-  font-family: 'Segoe UI', sans-serif;
+  font-family: "Segoe UI", sans-serif;
   background-color: #f3f4f6;
+}
+
+/* Common Input Style */
+.input {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  padding: 12px 16px;
+  outline: none;
+  background: white;
+}
+
+.input:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25);
+}
+
+/* Sidebar Buttons */
+.side-btn {
+  width: 100%;
+  color: white;
+  border-radius: 16px;
+  padding: 12px 16px;
+  font-weight: 700;
+  transition: 0.2s ease;
+}
+
+.side-btn:hover {
+  opacity: 0.9;
+}
+
+/* Modal Buttons */
+.modal-btn {
+  flex: 1;
+  color: white;
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-weight: 700;
+  transition: 0.2s ease;
+}
+
+.modal-btn:hover {
+  opacity: 0.9;
 }
