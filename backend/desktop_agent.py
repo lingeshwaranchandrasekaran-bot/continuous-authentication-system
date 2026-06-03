@@ -12,7 +12,7 @@ try:
 except Exception:
     ImageGrab = None
 
-API_BASE = "http://127.0.0.1:5000"
+API_BASE = "https://continuous-authentication-system.onrender.com"
 API_EVALUATE = f"{API_BASE}/api/desktop/evaluate"
 API_CURRENT_USER = f"{API_BASE}/api/desktop/current-user"
 API_EVIDENCE = f"{API_BASE}/api/desktop/evidence"

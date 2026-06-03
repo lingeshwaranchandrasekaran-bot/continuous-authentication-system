@@ -5,7 +5,7 @@ from tkinter import messagebox
 import webbrowser
 from urllib.parse import quote
 
-API_BASE = "http://127.0.0.1:5000"
+API_BASE = "https://continuous-authentication-system.onrender.com"
 
 LOGIN_URL = f"{API_BASE}/api/auth/login"
 SET_USER_URL = f"{API_BASE}/api/desktop/set-user"
@@ -73,7 +73,7 @@ def open_browser_session(path_after_login="dashboard"):
     has_baseline = "true" if logged_user.get("hasBaseline", False) else "false"
 
     webbrowser.open(
-        f"http://localhost:3000/desktop-session"
+        f"https://continuous-authentication-system-nldw.vercel.app/desktop-session"
         f"?username={username}&role={role}&hasBaseline={has_baseline}&next={path_after_login}"
     )
 
