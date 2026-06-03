@@ -73,7 +73,7 @@ def open_browser_session(path_after_login="dashboard"):
     has_baseline = "true" if logged_user.get("hasBaseline", False) else "false"
 
     webbrowser.open(
-        f"https://continuous-authentication-system-nldw.vercel.app/desktop-session"
+        f"https://continuous-authentication-system-nl.vercel.app/desktop-session"
         f"?username={username}&role={role}&hasBaseline={has_baseline}&next={path_after_login}"
     )
 
