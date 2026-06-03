@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 
-const API = "http://localhost:5000";
+const API = "https://continuous-authentication-system.onrender.com";
 
 const mcqQuestions = [
   { q: "Which database is used in this project?", options: ["MongoDB", "MySQL", "Oracle", "SQLite"] },

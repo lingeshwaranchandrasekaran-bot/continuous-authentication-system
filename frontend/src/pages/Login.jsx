@@ -10,7 +10,7 @@ function Login() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const API = "http://localhost:5000";
+  const API = "https://continuous-authentication-system.onrender.com";
 
   const handleLogin = async (e) => {
     e.preventDefault();

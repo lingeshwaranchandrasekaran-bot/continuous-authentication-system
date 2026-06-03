@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-const API = "http://localhost:5000";
+const API = "https://continuous-authentication-system.onrender.com";
 const MAX_WARNINGS = 3;
 
 const examTasks = [
