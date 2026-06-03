@@ -3,3 +3,5 @@ flask-cors
 pymongo
 numpy
 bcrypt
+gunicorn
+dnspython
