@@ -10,22 +10,31 @@ const mcqQuestions = [
   { q: "Which data is used for behavior biometrics?", options: ["Keystroke + Mouse", "Only password", "Only OTP", "Only email"] },
   { q: "Suspicious exam action?", options: ["Copy paste", "Tab switch", "Window blur", "All of the above"] },
   { q: "Backend framework used?", options: ["Flask", "Django", "Spring", "Laravel"] },
-  { q: "Frontend framework used?", options: ["React", "Angular", "Vue", "Next.js", "Laravel"] },
+  { q: "Frontend framework used?", options: ["React", "Angular", "Vue", "Next.js"] },
   { q: "Training data is stored in?", options: ["MongoDB", "Excel", "PDF", "Notepad"] },
   { q: "Continuous authentication checks user?", options: ["After login also", "Only before login", "Only signup", "Never"] },
 ];
 
 const sentences = [
-  "The quick brown fox jumps over the lazy dog and checks every keyboard pattern.",
-  "Continuous authentication monitors typing rhythm mouse movement and click behavior.",
-  "A secure system should verify the user even after the normal login process.",
-  "Keystroke dynamics uses hold time flight time typing speed and correction pattern.",
-  "Mouse behavior includes movement speed clicks scrolling dragging and idle activity.",
-  "MongoDB stores users training baseline alerts reports login logs and behavior sessions.",
-  "Siamese neural network compares current user behavior with the stored baseline.",
-  "Online exam fraud detection can identify tab switch copy paste and abnormal typing.",
-  "Admin dashboard shows user activity risk score suspicious alerts and PDF reports.",
-  "This project improves security by detecting unauthorized users during active sessions.",
+  "The User typed Password@2026 and entered 12345 before clicking Submit.",
+
+  "My Secure Login ID is TestUser01 and the code is #A1B2C3.",
+
+  "Admin entered Report_2026.pdf and verified 98% accuracy successfully.",
+
+  "The quick brown fox jumps over 13 lazy dogs near River#5 every day.",
+
+  "User123 typed HelloWorld! and updated the score to 99%.",
+
+  "Continuous Authentication checks typing speed, hold time, and flight time.",
+
+  "Please enter ExamCode@2026 and confirm using button number 7.",
+
+  "System Alert! Risk score reached 85% after multiple suspicious actions.",
+
+  "Upload File_01.docx and File_02.pdf before pressing Save & Continue.",
+
+  "Keyboard behavior includes A-Z, a-z, 0-9, and symbols ! @ # $ % ^ & * ( ).",
 ];
 
 const defaultEvents = () => ({
@@ -47,11 +56,15 @@ function Training() {
   const [step, setStep] = useState("mcq");
 
   const [mcqDone, setMcqDone] = useState(0);
+  const [selectedOption, setSelectedOption] = useState("");
+
   const [sentenceDone, setSentenceDone] = useState(0);
+  const [typedText, setTypedText] = useState("");
+
   const [fileDone, setFileDone] = useState(0);
   const [dragDone, setDragDone] = useState(0);
+  const [boxDropped, setBoxDropped] = useState(false);
 
-  const [typedText, setTypedText] = useState("");
   const [samples, setSamples] = useState([]);
   const [saving, setSaving] = useState(false);
 
@@ -75,25 +88,18 @@ function Training() {
 
     const onVisibility = () => {
       if (document.hidden) {
-        eventsRef.current.focusEvents.push({
-          type: "tab_switch",
-          time: Date.now(),
-        });
+        eventsRef.current.focusEvents.push({ type: "tab_switch", time: Date.now() });
       }
     };
 
     const onBlur = () => {
-      eventsRef.current.focusEvents.push({
-        type: "window_blur",
-        time: Date.now(),
-      });
+      eventsRef.current.focusEvents.push({ type: "window_blur", time: Date.now() });
     };
 
-    const onPaste = () => {
-      eventsRef.current.pasteEvents.push({
-        type: "paste",
-        time: Date.now(),
-      });
+    const onPaste = (e) => {
+      e.preventDefault();
+      eventsRef.current.pasteEvents.push({ type: "paste_blocked", time: Date.now() });
+      alert("Copy paste not allowed. Type manually.");
     };
 
     const onKeyDown = (e) => {
@@ -108,9 +114,7 @@ function Training() {
 
       if (lastKeyTimeRef.current) {
         const flight = t - lastKeyTimeRef.current;
-        if (flight > 0 && flight < 3000) {
-          eventsRef.current.flightTimes.push(flight);
-        }
+        if (flight > 0 && flight < 3000) eventsRef.current.flightTimes.push(flight);
       }
 
       lastKeyDownRef.current[e.code] = t;
@@ -130,15 +134,12 @@ function Training() {
       const downTime = lastKeyDownRef.current[e.code];
       if (downTime) {
         const hold = t - downTime;
-        if (hold > 0 && hold < 3000) {
-          eventsRef.current.holdTimes.push(hold);
-        }
+        if (hold > 0 && hold < 3000) eventsRef.current.holdTimes.push(hold);
       }
     };
 
     const onMouseMove = (e) => {
       const t = Date.now();
-
       if (t - lastMouseSaveRef.current < 70) return;
       lastMouseSaveRef.current = t;
 
@@ -153,17 +154,10 @@ function Training() {
         const dx = e.clientX - lastMouseRef.current.x;
         const dy = e.clientY - lastMouseRef.current.y;
         const dt = t - lastMouseRef.current.time;
-
-        if (dt > 0) {
-          eventsRef.current.mouseSpeeds.push(Math.sqrt(dx * dx + dy * dy) / dt);
-        }
+        if (dt > 0) eventsRef.current.mouseSpeeds.push(Math.sqrt(dx * dx + dy * dy) / dt);
       }
 
-      lastMouseRef.current = {
-        x: e.clientX,
-        y: e.clientY,
-        time: t,
-      };
+      lastMouseRef.current = { x: e.clientX, y: e.clientY, time: t };
     };
 
     const onClick = (e) => {
@@ -185,11 +179,7 @@ function Training() {
     };
 
     const onMouseDown = (e) => {
-      dragStartRef.current = {
-        x: e.clientX,
-        y: e.clientY,
-        time: Date.now(),
-      };
+      dragStartRef.current = { x: e.clientX, y: e.clientY, time: Date.now() };
     };
 
     const onMouseUp = (e) => {
@@ -238,10 +228,7 @@ function Training() {
     };
   }, []);
 
-  const mean = (arr) => {
-    if (!arr.length) return 0;
-    return arr.reduce((a, b) => a + b, 0) / arr.length;
-  };
+  const mean = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0);
 
   const std = (arr) => {
     if (!arr.length) return 0;
@@ -251,7 +238,6 @@ function Training() {
 
   const buildFeatureVector = () => {
     const e = eventsRef.current;
-
     return [
       mean(e.holdTimes),
       std(e.holdTimes),
@@ -272,7 +258,6 @@ function Training() {
 
   const buildFeatureObject = () => {
     const e = eventsRef.current;
-
     return {
       mean_hold: mean(e.holdTimes),
       std_hold: std(e.holdTimes),
@@ -312,29 +297,34 @@ function Training() {
     resetCapture();
   };
 
-  const handleMcqAnswer = (option) => {
+  const handleMcqNext = () => {
+    if (!selectedOption) {
+      alert("Please select one option");
+      return;
+    }
+
     const question = mcqQuestions[mcqDone];
 
     saveSample({
       taskType: "mcq",
       questionNo: mcqDone + 1,
       question: question.q,
-      selectedAnswer: option,
+      selectedAnswer: selectedOption,
     });
+
+    setSelectedOption("");
 
     const next = mcqDone + 1;
     setMcqDone(next);
 
-    if (next >= 10) {
-      setStep("sentence");
-    }
+    if (next >= 10) setStep("sentence");
   };
 
   const handleSentenceNext = () => {
     const expected = sentences[sentenceDone];
 
-    if (typedText.trim().length < 20) {
-      alert("Please type the sentence properly");
+    if (typedText.trim() !== expected.trim()) {
+      alert("Sentence must be typed exactly. Copy paste not allowed.");
       return;
     }
 
@@ -350,9 +340,7 @@ function Training() {
     const next = sentenceDone + 1;
     setSentenceDone(next);
 
-    if (next >= 10) {
-      setStep("file");
-    }
+    if (next >= 10) setStep("file");
   };
 
   const handleFileChoose = (e) => {
@@ -379,16 +367,34 @@ function Training() {
     const next = fileDone + 1;
     setFileDone(next);
 
-    if (next >= 5) {
-      setStep("drag");
-    }
+    if (next >= 5) setStep("drag");
 
     e.target.value = "";
   };
 
+  const handleHtmlDragStart = () => {
+    eventsRef.current.dragEvents.push({ type: "html_drag_start", time: Date.now() });
+  };
+
+  const allowDrop = (e) => {
+    e.preventDefault();
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+
+    eventsRef.current.dragEvents.push({
+      type: "box_dropped_inside_target",
+      time: Date.now(),
+    });
+
+    setBoxDropped(true);
+    setDragDone((prev) => Math.min(prev + 1, 5));
+  };
+
   const handleDragTaskDone = () => {
     if (dragDone < 5) {
-      alert("Please drag the box at least 5 times.");
+      alert("Please drag and drop the box inside target area at least 5 times.");
       return;
     }
 
@@ -400,24 +406,8 @@ function Training() {
     setStep("complete");
   };
 
-  const handleHtmlDragStart = () => {
-    eventsRef.current.dragEvents.push({
-      type: "html_drag_start",
-      time: Date.now(),
-    });
-  };
-
-  const handleHtmlDragEnd = () => {
-    eventsRef.current.dragEvents.push({
-      type: "html_drag_end",
-      time: Date.now(),
-    });
-
-    setDragDone((prev) => prev + 1);
-  };
-
   const qualityScore = Math.min(
-    mcqDone * 2 + sentenceDone * 3 + fileDone * 4 + dragDone * 3,
+    mcqDone * 2 + sentenceDone * 4 + fileDone * 4 + dragDone * 4,
     100
   );
 
@@ -434,9 +424,7 @@ function Training() {
     try {
       const res = await fetch(`${API}/api/training/save-baseline`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           userId: user.username,
           samples,
@@ -462,13 +450,10 @@ function Training() {
 
       localStorage.setItem("hasBaseline", "true");
       const oldUser = JSON.parse(localStorage.getItem("user"));
-      localStorage.setItem(
-        "user",
-        JSON.stringify({ ...oldUser, hasBaseline: true })
-      );
+      localStorage.setItem("user", JSON.stringify({ ...oldUser, hasBaseline: true }));
 
       alert("Training completed successfully ✅");
-      window.location.href = "/dashboard";
+      window.location.href = "/user";
     } catch (error) {
       alert("Backend connection failed");
     }
@@ -480,9 +465,7 @@ function Training() {
     <div className="min-h-screen bg-slate-100 p-6">
       <div className="max-w-5xl mx-auto space-y-6">
         <div className="bg-white rounded-3xl shadow p-6">
-          <h1 className="text-3xl font-bold text-slate-900">
-            Training Mode
-          </h1>
+          <h1 className="text-3xl font-bold text-slate-900">Training Mode</h1>
           <p className="text-slate-600 mt-2">
             Complete all tasks naturally to create your secure behavior baseline.
           </p>
@@ -510,20 +493,31 @@ function Training() {
               {mcqQuestions[mcqDone].options.map((opt, i) => (
                 <button
                   key={i}
-                  onClick={() => handleMcqAnswer(opt)}
-                  className="border rounded-2xl p-4 text-left font-semibold hover:bg-blue-50 hover:border-blue-500"
+                  onClick={() => setSelectedOption(opt)}
+                  className={`border rounded-2xl p-4 text-left font-semibold ${
+                    selectedOption === opt
+                      ? "bg-blue-600 text-white border-blue-600"
+                      : "hover:bg-blue-50 hover:border-blue-500"
+                  }`}
                 >
                   {opt}
                 </button>
               ))}
             </div>
+
+            <button
+              onClick={handleMcqNext}
+              className="mt-5 bg-blue-600 text-white px-6 py-3 rounded-2xl font-bold"
+            >
+              Next MCQ
+            </button>
           </section>
         )}
 
         {step === "sentence" && (
           <section className="bg-white rounded-3xl shadow p-6">
             <h2 className="text-2xl font-bold text-green-700 mb-4">
-              Step 2: Typing Task {sentenceDone + 1}/10
+              Step 2: Exact Typing Task {sentenceDone + 1}/10
             </h2>
 
             <div className="bg-slate-100 rounded-2xl p-5 mb-5 text-lg">
@@ -533,8 +527,14 @@ function Training() {
             <textarea
               value={typedText}
               onChange={(e) => setTypedText(e.target.value)}
+              onPaste={(e) => {
+                e.preventDefault();
+                alert("Copy paste not allowed. Type manually.");
+              }}
+              onCopy={(e) => e.preventDefault()}
+              onCut={(e) => e.preventDefault()}
               className="w-full h-40 rounded-2xl border p-4 text-lg outline-none focus:ring-2 focus:ring-green-500"
-              placeholder="Type the above sentence here..."
+              placeholder="Type the above sentence exactly..."
             />
 
             <button
@@ -553,7 +553,7 @@ function Training() {
             </h2>
 
             <p className="text-slate-600 mb-5">
-              Select any 5 files. Only file metadata is used for training behavior.
+              Select any 5 files. Only metadata is used for behavior training.
             </p>
 
             <input
@@ -567,27 +567,40 @@ function Training() {
         {step === "drag" && (
           <section className="bg-white rounded-3xl shadow p-6">
             <h2 className="text-2xl font-bold text-orange-700 mb-4">
-              Step 4: Drag Task
+              Step 4: Drag and Drop Task
             </h2>
 
             <p className="text-slate-600 mb-5">
-              Drag the box at least 5 times inside the area.
+              Drag the blue box and drop it inside the target area 5 times.
             </p>
 
-            <div className="h-72 rounded-3xl border-2 border-dashed border-orange-400 bg-orange-50 flex items-center justify-center select-none">
+            <div className="grid md:grid-cols-2 gap-6">
+              <div className="h-72 rounded-3xl border-2 border-dashed border-blue-400 bg-blue-50 flex items-center justify-center select-none">
+                <div
+                  draggable
+                  onDragStart={handleHtmlDragStart}
+                  className="bg-blue-600 text-white px-8 py-5 rounded-2xl font-bold shadow cursor-move"
+                >
+                  Drag Me
+                </div>
+              </div>
+
               <div
-                draggable
-                onDragStart={handleHtmlDragStart}
-                onDragEnd={handleHtmlDragEnd}
-                className="bg-blue-600 text-white px-8 py-5 rounded-2xl font-bold shadow cursor-move"
+                onDragOver={allowDrop}
+                onDrop={handleDrop}
+                className={`h-72 rounded-3xl border-2 border-dashed flex items-center justify-center ${
+                  boxDropped
+                    ? "bg-green-100 border-green-500 text-green-700"
+                    : "bg-orange-50 border-orange-400 text-orange-700"
+                }`}
               >
-                Drag Me
+                <h3 className="text-xl font-bold">
+                  {boxDropped ? "Dropped Successfully ✅" : "Drop Here"}
+                </h3>
               </div>
             </div>
 
-            <p className="mt-4 font-bold text-slate-700">
-              Drag Count: {dragDone}/5
-            </p>
+            <p className="mt-4 font-bold text-slate-700">Drop Count: {dragDone}/5</p>
 
             <button
               onClick={handleDragTaskDone}
@@ -605,7 +618,7 @@ function Training() {
             </h2>
 
             <p className="text-slate-600 mb-5">
-              All training tasks completed. Save baseline to MongoDB.
+              All training tasks completed. Save baseline to MongoDB Atlas.
             </p>
 
             <button
