@@ -7,8 +7,9 @@ function DesktopSession() {
 
   useEffect(() => {
     const username = params.get("username");
-    const role = params.get("role");
+    const role = params.get("role") || "user";
     const hasBaseline = params.get("hasBaseline") === "true";
+    const next = params.get("next") || "dashboard";
 
     if (!username || !role) {
       navigate("/", { replace: true });
@@ -32,6 +33,13 @@ function DesktopSession() {
 
     if (cleanRole === "admin") {
       navigate("/admin", { replace: true });
+      return;
+    }
+
+    if (next === "training") {
+      navigate("/training", { replace: true });
+    } else if (next === "exam") {
+      navigate("/exam", { replace: true });
     } else {
       navigate("/user", { replace: true });
     }
@@ -44,7 +52,7 @@ function DesktopSession() {
           Creating Secure Session...
         </h1>
         <p className="text-slate-600 mt-2">
-          Please wait, opening dashboard.
+          Please wait, opening selected mode.
         </p>
       </div>
     </div>
