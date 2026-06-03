@@ -6,3 +6,4 @@ bcrypt
 gunicorn
 dnspython
 torch
+reportlab
