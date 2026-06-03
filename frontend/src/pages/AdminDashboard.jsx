@@ -12,7 +12,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
-const API = "http://https://continuous-authentication-system.onrender.com";
+const API = "https://continuous-authentication-system.onrender.com";
 
 const navItems = [
   { label: "Overview", value: "dashboard" },
