@@ -23,11 +23,24 @@ from reportlab.pdfgen import canvas
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "change-this-secret-key")
 
+# CORS FIX:
+# Vercel frontend -> Render backend requests were blocked by browser CORS.
+# We are not using cookies/sessions for normal email-password login, so wildcard CORS is safe for this project demo.
 CORS(
     app,
-    resources={r"/api/*": {"origins": os.environ.get("FRONTEND_URL", "*")}},
-    supports_credentials=True,
+    resources={r"/*": {"origins": "*"}},
+    methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
+    supports_credentials=False,
 )
+
+@app.after_request
+def add_cors_headers(response):
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+    return response
+
 
 MONGO_URI = os.environ.get(
     "MONGO_URI",
@@ -928,8 +941,7 @@ def desktop_evaluate():
     })
 
 
-@app.route("/api/auth/register", methods=["POST"])
-def register():
+def create_password_account(allow_admin=False):
     ok, resp, code = db_required()
     if not ok:
         return resp, code
@@ -941,9 +953,10 @@ def register():
     username = normalize_email(data.get("username") or email)
     password = str(data.get("password", ""))
 
-    # Public signup must create normal user only.
-    # Admin account should be created manually in DB or through protected admin workflow.
-    role = "user"
+    # Public signup creates only normal user.
+    # Admin dashboard can create admin only when allow_admin=True.
+    requested_role = str(data.get("role", "user")).strip().lower()
+    role = requested_role if allow_admin and requested_role in ["user", "admin"] else "user"
 
     if not username or not password:
         return jsonify({"error": "Email ID and password required"}), 400
@@ -976,6 +989,11 @@ def register():
     })
 
     return jsonify({"message": "Account created successfully. Please login."}), 201
+
+
+@app.route("/api/auth/register", methods=["POST"])
+def register():
+    return create_password_account(allow_admin=False)
 
 
 @app.route("/api/auth/login", methods=["POST"])
@@ -1169,7 +1187,8 @@ def google_callback():
 
 @app.route("/api/admin/create-user", methods=["POST"])
 def admin_create_user():
-    return register()
+    # Admin dashboard can create user/admin accounts.
+    return create_password_account(allow_admin=True)
 
 
 @app.route("/api/admin/delete-user/<username>", methods=["DELETE"])
