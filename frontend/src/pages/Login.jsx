@@ -6,18 +6,75 @@ const API = "https://continuous-authentication-system.onrender.com";
 function Login() {
   const navigate = useNavigate();
 
-  const [username, setUsername] = useState("");
+  const [tab, setTab] = useState("signin");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [messageType, setMessageType] = useState("");
+
+  const resetForm = () => {
+    setEmail("");
+    setPassword("");
+    setConfirmPassword("");
+    setMessage("");
+    setMessageType("");
+    setShowPassword(false);
+  };
+
+  const saveLoginData = async (user, loginEmail) => {
+    const role = String(user.role || "user").toLowerCase();
+    const realUsername = user.username || loginEmail;
+    const hasBaseline = Boolean(user.hasBaseline);
+
+    localStorage.setItem(
+      "user",
+      JSON.stringify({
+        username: realUsername,
+        email: user.email || loginEmail,
+        role,
+        hasBaseline,
+      })
+    );
+
+    localStorage.setItem("userId", realUsername);
+    localStorage.setItem("role", role);
+    localStorage.setItem("hasBaseline", hasBaseline ? "true" : "false");
+
+    try {
+      await fetch(`${API}/api/desktop/set-user`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          userId: realUsername,
+          role,
+        }),
+      });
+    } catch {}
+
+    if (role === "admin") {
+      navigate("/admin");
+    } else {
+      navigate("/user");
+    }
+  };
 
   const handleLogin = async (e) => {
     e.preventDefault();
-    setError("");
+    setMessage("");
+    setMessageType("");
 
-    if (!username.trim() || !password.trim()) {
-      setError("Please enter username and password.");
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanPassword = password.trim();
+
+    if (!cleanEmail || !cleanPassword) {
+      setMessage("Please enter email id and password.");
+      setMessageType("error");
       return;
     }
 
@@ -30,57 +87,96 @@ function Login() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          username: username.trim(),
-          password: password.trim(),
+          username: cleanEmail,
+          email: cleanEmail,
+          password: cleanPassword,
         }),
       });
 
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.error || "Invalid username or password.");
+        setMessage(data.error || "Invalid email id or password.");
+        setMessageType("error");
         setLoading(false);
         return;
       }
 
-      const user = data.user || {};
-      const role = String(user.role || "user").toLowerCase();
-      const realUsername = user.username || username.trim();
-      const hasBaseline = Boolean(user.hasBaseline);
-
-      localStorage.setItem(
-        "user",
-        JSON.stringify({
-          username: realUsername,
-          role,
-          hasBaseline,
-        })
-      );
-
-      localStorage.setItem("userId", realUsername);
-      localStorage.setItem("role", role);
-      localStorage.setItem("hasBaseline", hasBaseline ? "true" : "false");
-
-      try {
-        await fetch(`${API}/api/desktop/set-user`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            userId: realUsername,
-            role,
-          }),
-        });
-      } catch {}
-
-      if (role === "admin") {
-        navigate("/admin");
-      } else {
-        navigate("/user");
-      }
+      await saveLoginData(data.user || {}, cleanEmail);
     } catch {
-      setError("Backend not reachable. Please try again after a few seconds.");
+      setMessage("Backend not reachable. Please try again after a few seconds.");
+      setMessageType("error");
+    }
+
+    setLoading(false);
+  };
+
+  const handleSignup = async (e) => {
+    e.preventDefault();
+    setMessage("");
+    setMessageType("");
+
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanPassword = password.trim();
+    const cleanConfirmPassword = confirmPassword.trim();
+
+    if (!cleanEmail || !cleanPassword || !cleanConfirmPassword) {
+      setMessage("Please fill all signup fields.");
+      setMessageType("error");
+      return;
+    }
+
+    if (!cleanEmail.includes("@") || !cleanEmail.includes(".")) {
+      setMessage("Please enter a valid email id.");
+      setMessageType("error");
+      return;
+    }
+
+    if (cleanPassword.length < 6) {
+      setMessage("Password must be at least 6 characters.");
+      setMessageType("error");
+      return;
+    }
+
+    if (cleanPassword !== cleanConfirmPassword) {
+      setMessage("Password and confirm password do not match.");
+      setMessageType("error");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const res = await fetch(`${API}/api/auth/register`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          username: cleanEmail,
+          email: cleanEmail,
+          password: cleanPassword,
+          role: "user",
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setMessage(data.error || "Signup failed. Please try again.");
+        setMessageType("error");
+        setLoading(false);
+        return;
+      }
+
+      setMessage("Account created successfully. Please login.");
+      setMessageType("success");
+      setTab("signin");
+      setPassword("");
+      setConfirmPassword("");
+    } catch {
+      setMessage("Backend not reachable. Please try again after a few seconds.");
+      setMessageType("error");
     }
 
     setLoading(false);
@@ -115,38 +211,82 @@ function Login() {
         </section>
 
         <section className="p-7 md:p-10">
-          <div className="mb-8">
+          <div className="mb-6">
             <p className="text-blue-600 text-xs font-black uppercase tracking-[0.25em]">
               Secure Access Portal
             </p>
 
             <h2 className="text-4xl font-black text-slate-950 mt-3">
-              Login
+              {tab === "signin" ? "Sign In" : "Create Account"}
             </h2>
 
             <p className="text-slate-500 mt-2">
-              Enter your authorized credentials to continue.
+              {tab === "signin"
+                ? "Enter your email id and password to continue."
+                : "Create a new user account using your email id."}
             </p>
           </div>
 
-          {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 mb-5 font-semibold">
-              {error}
+          <div className="flex mb-6 bg-slate-100 rounded-2xl p-1">
+            <button
+              type="button"
+              onClick={() => {
+                setTab("signin");
+                resetForm();
+              }}
+              className={`w-1/2 py-3 rounded-xl font-black ${
+                tab === "signin"
+                  ? "bg-blue-600 text-white shadow"
+                  : "text-slate-600"
+              }`}
+            >
+              Sign In
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setTab("signup");
+                resetForm();
+              }}
+              className={`w-1/2 py-3 rounded-xl font-black ${
+                tab === "signup"
+                  ? "bg-blue-600 text-white shadow"
+                  : "text-slate-600"
+              }`}
+            >
+              Sign Up
+            </button>
+          </div>
+
+          {message && (
+            <div
+              className={`rounded-2xl p-4 mb-5 font-semibold ${
+                messageType === "success"
+                  ? "bg-green-50 border border-green-200 text-green-700"
+                  : "bg-red-50 border border-red-200 text-red-700"
+              }`}
+            >
+              {message}
             </div>
           )}
 
-          <form onSubmit={handleLogin} className="space-y-5">
+          <form
+            onSubmit={tab === "signin" ? handleLogin : handleSignup}
+            className="space-y-5"
+          >
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-2">
-                Username
+                Email ID
               </label>
 
               <input
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                type="email"
                 className="w-full rounded-2xl border border-slate-300 px-4 py-4 outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Enter username"
-                autoComplete="username"
+                placeholder="Enter your email id"
+                autoComplete="email"
               />
             </div>
 
@@ -162,7 +302,9 @@ function Login() {
                   type={showPassword ? "text" : "password"}
                   className="w-full rounded-2xl border border-slate-300 px-4 py-4 pr-24 outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="Enter password"
-                  autoComplete="current-password"
+                  autoComplete={
+                    tab === "signin" ? "current-password" : "new-password"
+                  }
                 />
 
                 <button
@@ -175,12 +317,35 @@ function Login() {
               </div>
             </div>
 
+            {tab === "signup" && (
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-2">
+                  Confirm Password
+                </label>
+
+                <input
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  type={showPassword ? "text" : "password"}
+                  className="w-full rounded-2xl border border-slate-300 px-4 py-4 outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Confirm password"
+                  autoComplete="new-password"
+                />
+              </div>
+            )}
+
             <button
               type="submit"
               disabled={loading}
               className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-2xl py-4 font-black text-lg"
             >
-              {loading ? "Verifying..." : "Login Securely"}
+              {loading
+                ? tab === "signin"
+                  ? "Verifying..."
+                  : "Creating..."
+                : tab === "signin"
+                ? "Login Securely"
+                : "Create Account"}
             </button>
           </form>
 

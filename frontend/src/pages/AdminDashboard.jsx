@@ -12,6 +12,10 @@ const navItems = [
   { label: "Login Logs", value: "logins" },
 ];
 
+function safeUser(value) {
+  return encodeURIComponent(value || "");
+}
+
 function AdminDashboard() {
   const navigate = useNavigate();
 
@@ -32,7 +36,7 @@ function AdminDashboard() {
   const [riskFilter, setRiskFilter] = useState("ALL");
 
   const [showCreate, setShowCreate] = useState(false);
-  const [newUsername, setNewUsername] = useState("");
+  const [newEmail, setNewEmail] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newRole, setNewRole] = useState("user");
 
@@ -110,7 +114,9 @@ function AdminDashboard() {
 
   const loadUserDetails = async (username) => {
     try {
-      const res = await fetch(`${API}/api/admin/user-details/${username}`);
+      const res = await fetch(
+        `${API}/api/admin/user-details/${safeUser(username)}`
+      );
       const data = await res.json();
 
       if (!res.ok) {
@@ -126,22 +132,39 @@ function AdminDashboard() {
   };
 
   const createUser = async () => {
-    if (!newUsername || !newPassword) {
-      alert("Enter username and password");
+    if (!newEmail || !newPassword) {
+      alert("Enter email id and password");
+      return;
+    }
+
+    const cleanEmail = newEmail.trim().toLowerCase();
+
+    if (!cleanEmail.includes("@") || !cleanEmail.includes(".")) {
+      alert("Enter valid email id");
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      alert("Password must be at least 6 characters");
       return;
     }
 
     const res = await fetch(`${API}/api/admin/create-user`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: newUsername, password: newPassword, role: newRole }),
+      body: JSON.stringify({
+        username: cleanEmail,
+        email: cleanEmail,
+        password: newPassword,
+        role: newRole,
+      }),
     });
 
     const data = await res.json();
     if (!res.ok) return alert(data.error || "User creation failed");
 
     alert("User created successfully");
-    setNewUsername("");
+    setNewEmail("");
     setNewPassword("");
     setNewRole("user");
     setShowCreate(false);
@@ -149,7 +172,9 @@ function AdminDashboard() {
   };
 
   const blockUser = async (username) => {
-    const res = await fetch(`${API}/api/admin/block-user/${username}`, { method: "POST" });
+    const res = await fetch(`${API}/api/admin/block-user/${safeUser(username)}`, {
+      method: "POST",
+    });
     const data = await res.json();
     if (!res.ok) return alert(data.error || "Block failed");
 
@@ -159,7 +184,10 @@ function AdminDashboard() {
   };
 
   const unblockUser = async (username) => {
-    const res = await fetch(`${API}/api/admin/unblock-user/${username}`, { method: "POST" });
+    const res = await fetch(
+      `${API}/api/admin/unblock-user/${safeUser(username)}`,
+      { method: "POST" }
+    );
     const data = await res.json();
     if (!res.ok) return alert(data.error || "Unblock failed");
 
@@ -171,7 +199,10 @@ function AdminDashboard() {
   const resetTraining = async (username) => {
     if (!window.confirm(`Reset training baseline for ${username}?`)) return;
 
-    const res = await fetch(`${API}/api/admin/reset-training/${username}`, { method: "POST" });
+    const res = await fetch(
+      `${API}/api/admin/reset-training/${safeUser(username)}`,
+      { method: "POST" }
+    );
     const data = await res.json();
     if (!res.ok) return alert(data.error || "Training reset failed");
 
@@ -181,7 +212,10 @@ function AdminDashboard() {
   };
 
   const resetWarnings = async (username) => {
-    const res = await fetch(`${API}/api/admin/reset-warnings/${username}`, { method: "POST" });
+    const res = await fetch(
+      `${API}/api/admin/reset-warnings/${safeUser(username)}`,
+      { method: "POST" }
+    );
     const data = await res.json();
     if (!res.ok) return alert(data.error || "Warning reset failed");
 
@@ -193,7 +227,9 @@ function AdminDashboard() {
   const deleteUser = async (username) => {
     if (!window.confirm(`Delete user "${username}"?`)) return;
 
-    const res = await fetch(`${API}/api/admin/delete-user/${username}`, { method: "DELETE" });
+    const res = await fetch(`${API}/api/admin/delete-user/${safeUser(username)}`, {
+      method: "DELETE",
+    });
     const data = await res.json();
     if (!res.ok) return alert(data.error || "Delete failed");
 
@@ -204,7 +240,7 @@ function AdminDashboard() {
   };
 
   const downloadPDF = (username) => {
-    window.open(`${API}/api/admin/user-report-pdf/${username}`, "_blank");
+    window.open(`${API}/api/admin/user-report-pdf/${safeUser(username)}`, "_blank");
   };
 
   const selectedUserObj = selectedUserData?.user;
@@ -223,7 +259,9 @@ function AdminDashboard() {
               C
             </div>
             <h1 className="text-2xl font-black mt-4">CUA Admin</h1>
-            <p className="text-slate-500 text-sm mt-1">Security Monitoring Console</p>
+            <p className="text-slate-500 text-sm mt-1">
+              Security Monitoring Console
+            </p>
           </div>
 
           <div className="space-y-2">
@@ -286,10 +324,28 @@ function AdminDashboard() {
               <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
                 <div className="bg-white rounded-3xl p-6 w-full max-w-md shadow-xl">
                   <h2 className="text-2xl font-black mb-4">Create User</h2>
+                  <p className="text-sm text-slate-500 mb-4">
+                    User account email id based ah create aagum. Public signup la admin create aagathu.
+                  </p>
+
                   <div className="space-y-3">
-                    <Input placeholder="Username" value={newUsername} onChange={(e) => setNewUsername(e.target.value)} />
-                    <Input placeholder="Password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
-                    <select value={newRole} onChange={(e) => setNewRole(e.target.value)} className="input">
+                    <Input
+                      placeholder="Email ID"
+                      type="email"
+                      value={newEmail}
+                      onChange={(e) => setNewEmail(e.target.value)}
+                    />
+                    <Input
+                      placeholder="Password"
+                      type="password"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                    />
+                    <select
+                      value={newRole}
+                      onChange={(e) => setNewRole(e.target.value)}
+                      className="input"
+                    >
                       <option value="user">User</option>
                       <option value="admin">Admin</option>
                     </select>
@@ -298,7 +354,10 @@ function AdminDashboard() {
                       <button onClick={createUser} className="modal-btn bg-blue-600">
                         Create
                       </button>
-                      <button onClick={() => setShowCreate(false)} className="modal-btn bg-slate-700">
+                      <button
+                        onClick={() => setShowCreate(false)}
+                        className="modal-btn bg-slate-700"
+                      >
                         Cancel
                       </button>
                     </div>
@@ -368,11 +427,15 @@ function AdminDashboard() {
                   <Panel title="Search & Filter">
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-1 gap-2">
                       <Input
-                        placeholder="Search user..."
+                        placeholder="Search email id..."
                         value={userSearch}
                         onChange={(e) => setUserSearch(e.target.value)}
                       />
-                      <select value={riskFilter} onChange={(e) => setRiskFilter(e.target.value)} className="input">
+                      <select
+                        value={riskFilter}
+                        onChange={(e) => setRiskFilter(e.target.value)}
+                        className="input"
+                      >
                         <option value="ALL">All Users</option>
                         <option value="GENUINE">Genuine Users</option>
                         <option value="SUSPICIOUS">Suspicious Users</option>
@@ -403,10 +466,13 @@ function AdminDashboard() {
                           >
                             <div className="flex justify-between gap-2">
                               <div className="min-w-0">
-                                <h3 className="font-black truncate">{u.username}</h3>
+                                <h3 className="font-black truncate">{u.email || u.username}</h3>
                                 <p className="text-xs text-slate-500 uppercase">{u.role}</p>
                               </div>
-                              <Badge label={u.isBlocked ? "BLOCKED" : risk} type={u.isBlocked ? "FRAUD" : risk} />
+                              <Badge
+                                label={u.isBlocked ? "BLOCKED" : risk}
+                                type={u.isBlocked ? "FRAUD" : risk}
+                              />
                             </div>
 
                             <div className="grid grid-cols-3 gap-2 mt-3">
@@ -431,7 +497,9 @@ function AdminDashboard() {
                       <Panel title="Selected User Control">
                         <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
                           <div>
-                            <h2 className="text-3xl font-black">{selectedUserObj.username}</h2>
+                            <h2 className="text-3xl font-black break-all">
+                              {selectedUserObj.email || selectedUserObj.username}
+                            </h2>
                             <div className="flex flex-wrap gap-2 mt-2">
                               <Badge label={selectedUserObj.role} type="INFO" />
                               <Badge
@@ -439,8 +507,16 @@ function AdminDashboard() {
                                 type={selectedUserObj.isBlocked ? "FRAUD" : "GENUINE"}
                               />
                               <Badge
-                                label={selectedTraining.status === "COMPLETED" ? "TRAINED" : "TRAINING PENDING"}
-                                type={selectedTraining.status === "COMPLETED" ? "GENUINE" : "SUSPICIOUS"}
+                                label={
+                                  selectedTraining.status === "COMPLETED"
+                                    ? "TRAINED"
+                                    : "TRAINING PENDING"
+                                }
+                                type={
+                                  selectedTraining.status === "COMPLETED"
+                                    ? "GENUINE"
+                                    : "SUSPICIOUS"
+                                }
                               />
                             </div>
                           </div>
@@ -482,7 +558,14 @@ function AdminDashboard() {
                             <Info title="Status" value={selectedTraining.status || "Not Completed"} />
                             <Info title="Quality" value={`${selectedTraining.qualityScore || 0}%`} />
                             <Info title="Threshold" value={selectedTraining.personalThreshold || "0.60"} />
-                            <Info title="Samples" value={selectedTraining.data?.length || selectedTraining.featureVectors?.length || 0} />
+                            <Info
+                              title="Samples"
+                              value={
+                                selectedTraining.data?.length ||
+                                selectedTraining.featureVectors?.length ||
+                                0
+                              }
+                            />
                           </div>
                         </Panel>
 
@@ -509,7 +592,9 @@ function AdminDashboard() {
                               <Row key={i}>
                                 <div>
                                   <p className="font-black">{a.type || "ALERT"}</p>
-                                  <p className="text-sm text-slate-600">{a.message || "No message"}</p>
+                                  <p className="text-sm text-slate-600">
+                                    {a.message || "No message"}
+                                  </p>
                                   <p className="text-xs text-slate-400">{formatIST(a.createdAt)}</p>
                                 </div>
                                 <p className="font-black text-red-600">Risk {a.riskScore || 0}</p>
@@ -590,7 +675,9 @@ function AdminDashboard() {
                     <Row key={i}>
                       <div>
                         <p className="font-black">{r.userId || "N/A"}</p>
-                        <p className="text-xs text-slate-400">{formatIST(r.createdAt || r.submittedAt)}</p>
+                        <p className="text-xs text-slate-400">
+                          {formatIST(r.createdAt || r.submittedAt)}
+                        </p>
                       </div>
                       <div className="grid grid-cols-4 gap-2 text-center">
                         <Mini title="Score" value={`${r.scorePercent || 0}%`} />
@@ -634,7 +721,7 @@ function AnalyticsPanel({ username }) {
   useEffect(() => {
     if (!username) return;
 
-    fetch(`${API}/api/admin/user-analytics/${username}`)
+    fetch(`${API}/api/admin/user-analytics/${safeUser(username)}`)
       .then((res) => res.json())
       .then((d) => setData(d))
       .catch(() => setData(null));
@@ -709,10 +796,16 @@ function TrendBox({ title, items, color, suffix }) {
             <div key={i}>
               <div className="flex justify-between text-xs font-bold">
                 <span>{r.status || title}</span>
-                <span>{r.value}{suffix}</span>
+                <span>
+                  {r.value}
+                  {suffix}
+                </span>
               </div>
               <div className="h-2 bg-white rounded-full overflow-hidden">
-                <div className={`h-full ${barColor}`} style={{ width: `${Math.min(r.value, 100)}%` }} />
+                <div
+                  className={`h-full ${barColor}`}
+                  style={{ width: `${Math.min(r.value, 100)}%` }}
+                />
               </div>
             </div>
           ))
@@ -799,7 +892,10 @@ function Action({ label, color, onClick }) {
   };
 
   return (
-    <button onClick={onClick} className={`${colors[color] || colors.blue} text-white px-3 py-2 rounded-xl text-sm font-bold`}>
+    <button
+      onClick={onClick}
+      className={`${colors[color] || colors.blue} text-white px-3 py-2 rounded-xl text-sm font-bold`}
+    >
       {label}
     </button>
   );
