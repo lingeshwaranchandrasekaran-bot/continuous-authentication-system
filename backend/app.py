@@ -1,11 +1,18 @@
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, redirect
 from flask_cors import CORS
 from pymongo import MongoClient
 from datetime import datetime, timezone
 from io import BytesIO
 import os
+import re
 import base64
+from urllib.parse import urlencode
 from pathlib import Path
+
+try:
+    from authlib.integrations.flask_client import OAuth
+except Exception:
+    OAuth = None
 import numpy as np
 import bcrypt
 import torch
@@ -14,11 +21,43 @@ from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
 app = Flask(__name__)
-CORS(app)
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "change-this-secret-key")
 
-MONGO_URI = "mongodb+srv://Monitor:monitor12345@cluster0.4dytkvk.mongodb.net/?appName=Cluster0"
-DB_NAME = "monitor_system"
+CORS(
+    app,
+    resources={r"/api/*": {"origins": os.environ.get("FRONTEND_URL", "*")}},
+    supports_credentials=True,
+)
+
+MONGO_URI = os.environ.get(
+    "MONGO_URI",
+    "mongodb+srv://Monitor:monitor12345@cluster0.4dytkvk.mongodb.net/?appName=Cluster0"
+)
+DB_NAME = os.environ.get("DB_NAME", "monitor_system")
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:3000").rstrip("/")
 FEATURE_SIZE = 12
+
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+GOOGLE_REDIRECT_URI = os.environ.get(
+    "GOOGLE_REDIRECT_URI",
+    "https://continuous-authentication-system.onrender.com/api/auth/google/callback"
+)
+
+oauth = None
+google = None
+
+if OAuth and GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
+    oauth = OAuth(app)
+    google = oauth.register(
+        name="google",
+        client_id=GOOGLE_CLIENT_ID,
+        client_secret=GOOGLE_CLIENT_SECRET,
+        server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+        client_kwargs={"scope": "openid email profile"},
+    )
+else:
+    print("⚠️ Google OAuth not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET.")
 
 client = None
 db = None
@@ -59,6 +98,44 @@ def db_required():
     if db is None:
         return False, jsonify({"error": "MongoDB not connected"}), 500
     return True, None, None
+
+
+def normalize_email(value):
+    return str(value or "").strip().lower()
+
+
+def is_valid_email(value):
+    value = normalize_email(value)
+    return re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", value) is not None
+
+
+def safe_redirect_to_frontend(path, params=None):
+    params = params or {}
+    query = urlencode(params)
+    if query:
+        return f"{FRONTEND_URL}{path}?{query}"
+    return f"{FRONTEND_URL}{path}"
+
+
+def public_user_payload(user, baseline_exists=None):
+    real_username = user.get("username", "")
+    role = str(user.get("role", "user")).lower()
+
+    if baseline_exists is None:
+        baseline_exists = db.training.find_one({
+            "userId": {"$regex": f"^{re.escape(real_username)}$", "$options": "i"}
+        }) is not None
+
+    return {
+        "username": real_username,
+        "email": user.get("email", real_username),
+        "name": user.get("name", real_username),
+        "picture": user.get("picture", ""),
+        "role": role,
+        "hasBaseline": bool(baseline_exists),
+        "requiresTraining": False if role == "admin" else not bool(baseline_exists),
+        "redirectPath": "/admin" if role == "admin" else "/user"
+    }
 
 
 def clean_value(value):
@@ -858,31 +935,47 @@ def register():
         return resp, code
 
     data = request.json or {}
-    username = data.get("username", "").strip()
-    password = data.get("password", "")
-    role = data.get("role", "user").strip().lower()
+
+    # Frontend can send either email or username. For external project, email is used as username.
+    email = normalize_email(data.get("email") or data.get("username"))
+    username = normalize_email(data.get("username") or email)
+    password = str(data.get("password", ""))
+
+    # Public signup must create normal user only.
+    # Admin account should be created manually in DB or through protected admin workflow.
+    role = "user"
 
     if not username or not password:
-        return jsonify({"error": "Username and password required"}), 400
+        return jsonify({"error": "Email ID and password required"}), 400
 
-    if role not in ["user", "admin"]:
-        role = "user"
+    if not is_valid_email(username):
+        return jsonify({"error": "Please enter a valid email id"}), 400
 
-    if db.users.find_one({"username": {"$regex": f"^{username}$", "$options": "i"}}):
-        return jsonify({"error": "User already exists"}), 409
+    if len(password) < 6:
+        return jsonify({"error": "Password must be at least 6 characters"}), 400
+
+    if db.users.find_one({
+        "$or": [
+            {"username": {"$regex": f"^{re.escape(username)}$", "$options": "i"}},
+            {"email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}}
+        ]
+    }):
+        return jsonify({"error": "Account already exists. Please login."}), 409
 
     hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
     db.users.insert_one({
         "username": username,
+        "email": email,
         "password": hashed,
+        "authProvider": "password",
         "role": role,
         "isBlocked": False,
         "hasBaseline": False,
         "createdAt": now_utc()
     })
 
-    return jsonify({"message": "User created successfully"})
+    return jsonify({"message": "Account created successfully. Please login."}), 201
 
 
 @app.route("/api/auth/login", methods=["POST"])
@@ -892,21 +985,27 @@ def login():
         return resp, code
 
     data = request.json or {}
-    username = data.get("username", "").strip()
-    password = data.get("password", "").strip()
+    username = normalize_email(data.get("username") or data.get("email"))
+    password = str(data.get("password", "")).strip()
 
     if not username or not password:
-        return jsonify({"error": "Username and password required"}), 400
+        return jsonify({"error": "Email ID and password required"}), 400
 
     user = db.users.find_one({
-        "username": {"$regex": f"^{username}$", "$options": "i"}
+        "$or": [
+            {"username": {"$regex": f"^{re.escape(username)}$", "$options": "i"}},
+            {"email": {"$regex": f"^{re.escape(username)}$", "$options": "i"}}
+        ]
     })
 
     if not user:
-        return jsonify({"error": "Invalid username or password"}), 401
+        return jsonify({"error": "Invalid email id or password"}), 401
 
     if user.get("isBlocked", False):
         return jsonify({"error": "Your account has been blocked by admin"}), 403
+
+    if user.get("authProvider") == "google" and not user.get("password"):
+        return jsonify({"error": "This account uses Google login. Please continue with Google."}), 401
 
     stored_password = user.get("password", "")
     password_ok = False
@@ -922,36 +1021,150 @@ def login():
         password_ok = stored_password == password
 
     if not password_ok:
-        return jsonify({"error": "Invalid username or password"}), 401
+        return jsonify({"error": "Invalid email id or password"}), 401
 
     real_username = user.get("username", username)
-    role = user.get("role", "user").lower()
+    role = str(user.get("role", "user")).lower()
 
     baseline_exists = db.training.find_one({
-        "userId": {"$regex": f"^{real_username}$", "$options": "i"}
+        "userId": {"$regex": f"^{re.escape(real_username)}$", "$options": "i"}
     }) is not None
 
     db.users.update_one(
-        {"username": {"$regex": f"^{real_username}$", "$options": "i"}},
-        {"$set": {"hasBaseline": baseline_exists}}
+        {"username": {"$regex": f"^{re.escape(real_username)}$", "$options": "i"}},
+        {"$set": {"hasBaseline": baseline_exists, "lastLoginAt": now_utc()}}
     )
 
     db.login_logs.insert_one({
         "username": real_username,
+        "email": user.get("email", real_username),
         "role": role,
+        "authProvider": user.get("authProvider", "password"),
         "loginAt": now_utc()
     })
 
     return jsonify({
         "message": "Login success",
-        "user": {
-            "username": real_username,
-            "role": role,
-            "hasBaseline": baseline_exists,
-            "requiresTraining": False if role == "admin" else not baseline_exists,
-            "redirectPath": "/admin" if role == "admin" else "/user"
-        }
+        "user": public_user_payload(user, baseline_exists)
     })
+
+
+@app.route("/api/auth/google", methods=["GET"])
+def google_login():
+    ok, resp, code = db_required()
+    if not ok:
+        return resp, code
+
+    if google is None:
+        return jsonify({
+            "error": "Google login not configured. Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in Render environment variables."
+        }), 500
+
+    return google.authorize_redirect(GOOGLE_REDIRECT_URI)
+
+
+@app.route("/api/auth/google/callback", methods=["GET"])
+def google_callback():
+    ok, resp, code = db_required()
+    if not ok:
+        return resp, code
+
+    if google is None:
+        return jsonify({"error": "Google login not configured"}), 500
+
+    try:
+        token = google.authorize_access_token()
+        info = token.get("userinfo")
+
+        if not info:
+            info = google.parse_id_token(token)
+
+        email = normalize_email(info.get("email"))
+        name = info.get("name", email)
+        picture = info.get("picture", "")
+
+        if not email:
+            return jsonify({"error": "Google account email not received"}), 400
+
+        user = db.users.find_one({
+            "$or": [
+                {"username": {"$regex": f"^{re.escape(email)}$", "$options": "i"}},
+                {"email": {"$regex": f"^{re.escape(email)}$", "$options": "i"}}
+            ]
+        })
+
+        if user and user.get("isBlocked", False):
+            return redirect(safe_redirect_to_frontend("/login", {
+                "error": "Your account has been blocked by admin"
+            }))
+
+        if not user:
+            # Google login creates only normal user. Admin must be manually created in DB.
+            new_user = {
+                "username": email,
+                "email": email,
+                "name": name,
+                "picture": picture,
+                "password": "",
+                "authProvider": "google",
+                "role": "user",
+                "isBlocked": False,
+                "hasBaseline": False,
+                "createdAt": now_utc(),
+                "lastLoginAt": now_utc()
+            }
+            db.users.insert_one(new_user)
+            user = new_user
+        else:
+            # Keep existing admin role if email already belongs to admin.
+            db.users.update_one(
+                {"_id": user["_id"]},
+                {
+                    "$set": {
+                        "email": email,
+                        "name": name,
+                        "picture": picture,
+                        "lastLoginAt": now_utc()
+                    },
+                    "$setOnInsert": {"authProvider": "google"}
+                }
+            )
+            user = db.users.find_one({"_id": user["_id"]})
+
+        real_username = user.get("username", email)
+        role = str(user.get("role", "user")).lower()
+
+        baseline_exists = db.training.find_one({
+            "userId": {"$regex": f"^{re.escape(real_username)}$", "$options": "i"}
+        }) is not None
+
+        db.users.update_one(
+            {"username": {"$regex": f"^{re.escape(real_username)}$", "$options": "i"}},
+            {"$set": {"hasBaseline": baseline_exists}}
+        )
+
+        db.login_logs.insert_one({
+            "username": real_username,
+            "email": email,
+            "role": role,
+            "authProvider": "google",
+            "loginAt": now_utc()
+        })
+
+        # Frontend should create /google-success route and store these values in localStorage.
+        return redirect(safe_redirect_to_frontend("/google-success", {
+            "username": real_username,
+            "email": email,
+            "role": role,
+            "hasBaseline": "true" if baseline_exists else "false",
+            "redirectPath": "/admin" if role == "admin" else "/user"
+        }))
+
+    except Exception as e:
+        print("GOOGLE LOGIN ERROR:", str(e))
+        return redirect(safe_redirect_to_frontend("/login", {
+            "error": "Google login failed. Please try again."
+        }))
 
 
 @app.route("/api/admin/create-user", methods=["POST"])
