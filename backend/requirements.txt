@@ -7,3 +7,4 @@ gunicorn
 dnspython
 torch
 reportlab
+Authlib
